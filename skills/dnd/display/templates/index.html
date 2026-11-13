@@ -6505,7 +6505,11 @@ let _ttsVoice = (_narratorVoiceMeta && _narratorVoiceMeta.getAttribute('content'
   || localStorage.getItem('dnd_tts_voice')
   || 'Enceladus';
 
-let _ttsAutoNarrate = localStorage.getItem('dnd_tts_auto') === '1';
+// On unless this browser explicitly turned it off: a table that set up a voice
+// key wants every DM block read aloud, and an off-by-default toggle that lives
+// per browser and per origin (localhost vs the LAN IP are separate) meant the
+// TV silently narrated nothing until someone found the setting.
+let _ttsAutoNarrate = localStorage.getItem('dnd_tts_auto') !== '0';
 
 let _ttsCtx = null;
 let _ttsActiveSource = null;
@@ -6679,6 +6683,37 @@ function _ttsStopActive() {
   }
 }
 
+// Auto-narrate queue. The DM sends a turn as several blocks in one burst
+// (narration, an NPC line, a tutor hint); each block's auto-play used to call
+// _ttsPlayBlock directly, which stops whatever is playing first, so only the
+// last block of the burst was ever heard. Queued blocks now wait their turn.
+const _ttsAutoQueue = [];
+let _ttsAutoBusy = false;
+
+function _ttsBtnBusy(btn) {
+  return btn.classList.contains('tts-playing') || btn.classList.contains('tts-loading');
+}
+
+function _ttsAutoEnqueue(btn, blockEl) {
+  _ttsAutoQueue.push([btn, blockEl]);
+  if (!_ttsAutoBusy) _ttsAutoNext();
+}
+
+async function _ttsAutoNext() {
+  const next = _ttsAutoQueue.shift();
+  if (!next) { _ttsAutoBusy = false; return; }
+  _ttsAutoBusy = true;
+  const [btn, blockEl] = next;
+  try { await _ttsPlayBlock(btn, blockEl); } catch (_) {}
+  // _ttsPlayBlock returns once playback has started; move on when this block's
+  // button leaves the playing/loading state (finished, stopped by hand, failed).
+  const waitDone = () => {
+    if (_ttsBtnBusy(btn)) { setTimeout(waitDone, 250); return; }
+    _ttsAutoNext();
+  };
+  setTimeout(waitDone, 250);
+}
+
 function _ttsExtractText(blockEl) {
   const clone = blockEl.cloneNode(true);
   const bar = clone.querySelector('.tts-bar');
@@ -6845,7 +6880,7 @@ function _addTtsBar(blockEl) {
 
   if (_ttsAutoNarrate) {
     // Defer one tick so the bar is in the DOM before triggering the click path
-    setTimeout(() => _ttsPlayBlock(playBtn, blockEl), 0);
+    setTimeout(() => _ttsAutoEnqueue(playBtn, blockEl), 0);
   }
 }
 
@@ -6867,6 +6902,7 @@ if (_TTS_AVAILABLE) {
     narrateRow.addEventListener('click', () => {
       _ttsAutoNarrate = !_ttsAutoNarrate;
       localStorage.setItem('dnd_tts_auto', _ttsAutoNarrate ? '1' : '0');
+      if (!_ttsAutoNarrate) _ttsAutoQueue.length = 0;   // turning it off drops what's waiting
       refresh();
       if (_ttsAutoNarrate) {
         // Prime the AudioContext from this click so auto-narrate works on the next
