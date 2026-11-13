@@ -588,6 +588,15 @@ Read `characters/<name>.md`, display cleanly. If name omitted and one character 
 
 ---
 
+## `/dm:dnd character import-ddb <D&D Beyond URL | id | saved .json>`
+Bring a player's D&D Beyond character in, and catch sheet problems before the session rather than mid-fight.
+1. Run `python ${CLAUDE_SKILL_DIR}/scripts/ddb_import.py "<url>" --ruleset <campaign ruleset>`. It reads the character service's JSON, which answers only for characters whose sharing is **Public** (Character → Manage → Sharing). On exit 2, tell the player exactly that, or open the JSON URL it prints in the browser (signed in), save it as a `.json` file, and pass the file.
+2. Read every `!` line to the player with its `→` fix — unequipped armor (D&D Beyond shows AC 10), no spells prepared, Weapon Mastery for a weapon they don't carry, a 2014 background on a 2024 character, an unfinished sheet. Ask them to fix it on D&D Beyond and run the import again; don't silently "correct" their sheet.
+3. Write the character file from the summary through the normal `/dm:dnd character new` sheet format (`templates/character-sheet.md`), using `--json` output for the numbers. Note "Imported from D&D Beyond <id>" at the top.
+Only fall back to reading the sheet page in the browser when neither the URL nor a saved file works.
+
+---
+
 ## `/dm:dnd character import <name> [from:<campaign>]`
 1. Find character sheet: `from:<campaign>` specified → that campaign's characters/; otherwise check global roster `~/.claude/dnd/characters/<name>.md`; if neither → search all campaigns, list matches, ask.
 2. Show summary (level, XP, HP, key inventory) and ask: *"Import at current level [X], or level up before starting?"*
