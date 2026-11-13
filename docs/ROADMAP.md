@@ -12,6 +12,24 @@ game. Phases 2 and 3 are those two areas.
 
 ---
 
+## Status — 2026-11-13
+
+All of Phases 0–4 are implemented on `feat/auto-narrate-queue`, one commit per
+item, with tests (497 pass, 4 skipped). Checked in a sandboxed display in the
+browser: the one-call turn, the one-player Send, physical dice through to
+`--wait`, NPC voice tags, the TV and phone battle map, and the launcher.
+
+Still needs a live check at a real table:
+- `ddb_import.py` against a real (public) D&D Beyond character — it was built
+  and tested on a fixture of the v5 JSON shape only.
+- Audio with the real Gemini voice: prefetch timing, per-NPC voices, the
+  "Tap for audio" button on the actual TV browser.
+- `start_display.py --lan` with the phones and TV on the home network.
+- The once-per-round D&D Beyond mirror (§3.4) is a documented procedure in the
+  maps skill; it has not been run against Maps.
+
+---
+
 ## Where things stand
 
 **Works well:** campaign files and world generation, the 2024 SRD dataset (once

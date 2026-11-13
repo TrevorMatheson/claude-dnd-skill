@@ -10,6 +10,34 @@ Versions before **1.6.0** are reconstructed retroactively from git history; the 
 
 ## [Unreleased]
 
+From the first live table test (see `docs/ROADMAP.md`).
+
+**Table safety**
+- The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
+- plugin.json / marketplace.json / SKILL.md versions match VERSION again (they said 2.4.0), with a test.
+- combat.py, dice.py and character.py reject unknown options; `combat.py attack --advantage / --disadvantage`.
+- `send.py` award and stat-only sends no longer hang on an open stdin; `--dice-request --wait` prints each roll (or `--json`) and waits 10 minutes.
+- Campaign-file writers keep each file's line ending (no more CRLF churn or doubled `` on Windows).
+- DM Help says why it's unavailable instead of failing silently, and no longer hard-codes model ids.
+- The 2024 dataset builds into the data root (survives reinstalls) and fails loudly without PyYAML.
+
+**Narration**
+- `send.py --turn` sends a whole DM turn in one call, in order.
+- The player whose turn it is can Send alone; nobody else has to press skip.
+- Physical dice: type the face on the phone or TV roller; roll prompts name the die, bonus and target.
+- NPCs read in their own voice (`**Voice:**` in npcs.md), tutor hints in `tutor_voice`; the next clip is fetched while one plays; optional read-aloud for dice and hints; a "Tap for audio" button; a new voice key is picked up without a reload; replayed history is no longer read aloud.
+- `### Narration` rules in the DM Style Notes template.
+
+**Battle map**
+- A TV map panel that follows the fight: `combat.py map / place / move / turn / hp`, movement checked against walls and speed, reach and range checks on `attack --from/--target`, moves inside `send.py --turn`; phones highlight their own token.
+- The maps skill mirrors moves to D&D Beyond once per round, as one batch.
+
+**Setup**
+- `display/start_display.py`: a launcher for every platform that picks the real LAN adapter.
+- `/dm:dnd doctor` (`scripts/doctor.py`) checks the whole table setup.
+- `/dm:dnd character import-ddb` (`scripts/ddb_import.py`) flags D&D Beyond sheet problems before play.
+- Rarely used procedures moved to `SKILL-reference.md`, read on demand.
+
 ## [2.7.0] — 2026-11-08 — Timed effects on in-game time, rests and rolls that follow the rules, 2024 backgrounds and level-up choices, and short replies that survive every script
 
 Twenty changes in one release, so an existing install updates once and receives
