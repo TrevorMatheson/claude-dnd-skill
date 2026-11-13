@@ -163,7 +163,42 @@ def key_source() -> str:
 # ── Synthesis ───────────────────────────────────────────────────────────────
 
 class TtsError(Exception):
-    """Raised by synthesize_strict; caught by synthesize to fail silently."""
+    """Raised by synthesize_strict; caught by synthesize to fail silently.
+
+    `status` is the upstream HTTP status (0 if none). For a 429, `quota_id`
+    names the exhausted quota (e.g. GenerateRequestsPerDayPerProjectPerModel-
+    FreeTier, which is 10 requests a day for this model) and `retry_after`
+    is Gemini's suggested wait in seconds."""
+
+    def __init__(self, msg, status: int = 0, quota_id: str = "", retry_after: float = 0.0):
+        super().__init__(msg)
+        self.status = status
+        self.quota_id = quota_id
+        self.retry_after = retry_after
+
+    @property
+    def daily_quota(self) -> bool:
+        return self.status == 429 and "PerDay" in self.quota_id
+
+
+def _parse_quota(body: str) -> tuple:
+    """(quota_id, retry_after seconds) from a Gemini 429 body; ("", 0) if absent."""
+    try:
+        err = json.loads(body).get("error", {})
+    except (ValueError, AttributeError):
+        return "", 0.0
+    quota_id, retry = "", 0.0
+    for det in err.get("details", []) or []:
+        t = str(det.get("@type", ""))
+        if t.endswith("QuotaFailure"):
+            for v in det.get("violations", []) or []:
+                quota_id = quota_id or str(v.get("quotaId", ""))
+        elif t.endswith("RetryInfo"):
+            try:
+                retry = float(str(det.get("retryDelay", "0")).rstrip("s") or 0)
+            except ValueError:
+                pass
+    return quota_id, retry
 
 
 def synthesize_strict(
@@ -220,12 +255,14 @@ def synthesize_strict(
                 raise TtsError(f"http {resp.status}")
             raw = resp.read()
     except urllib.error.HTTPError as e:
-        snippet = ""
+        body_txt = ""
         try:
-            snippet = e.read().decode("utf-8", errors="replace")[:200]
+            body_txt = e.read().decode("utf-8", errors="replace")
         except Exception:
             pass
-        raise TtsError(f"http {e.code}: {snippet}") from e
+        quota_id, retry = _parse_quota(body_txt) if e.code == 429 else ("", 0.0)
+        raise TtsError(f"http {e.code}: {body_txt[:200]}", status=e.code,
+                       quota_id=quota_id, retry_after=retry) from e
     except urllib.error.URLError as e:
         raise TtsError(f"network: {e.reason}") from e
     except Exception as e:

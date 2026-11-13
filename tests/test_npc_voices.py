@@ -130,6 +130,15 @@ class TestPageWiring(unittest.TestCase):
         # Found in the walkthrough: the sidebar said Round 2, the map Round 1.
         self.assertIn("(_bmState.round || m.round || 1)", self.src)
 
+    def test_flush_keeps_the_last_paragraph(self):
+        # Found re-timing the release: flushNewBlock removed currentCursor,
+        # which is the narration's last <p>, so narration that ended a turn
+        # disappeared from the TV once the idle timer fired.
+        m = re.search(r"function flushNewBlock\(\) \{(.*?)\n\}", self.src, re.S)
+        self.assertIsNotNone(m)
+        self.assertNotIn("removeChild(currentCursor)", m.group(1))
+        self.assertIn("currentCursor.classList.remove('typing-cursor')", m.group(1))
+
     def test_block_voice_used_for_tts(self):
         self.assertIn("_ttsFetchPcm(text, _ttsBlockVoice(blockEl))", self.src)
 

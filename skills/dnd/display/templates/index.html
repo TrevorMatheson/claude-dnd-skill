@@ -2348,9 +2348,10 @@
     100% { filter: blur(0.4px); }
   }
   /* ── Battle map panel (combat.py map / place / move → stats.map) ── */
+  :root { --bm-w: min(40vw, 700px); }
   #battle-map {
     position: fixed; top: 64px; right: 16px; z-index: 40;
-    width: min(46vw, 760px); height: min(62vh, 620px);
+    width: var(--bm-w); height: min(62vh, 620px);
     display: flex; flex-direction: column;
     background: rgba(14, 10, 6, 0.92); border: 1px solid rgba(201, 168, 76, 0.45);
     border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); overflow: hidden;
@@ -2392,6 +2393,15 @@
   .bm-token.mine { outline: 3px solid #ffd76a; outline-offset: 2px; animation: bm-pulse 1.6s ease-in-out infinite; }
   .bm-token.current { box-shadow: 0 0 0 3px rgba(255, 215, 106, .55), 0 2px 6px rgba(0, 0, 0, .6); }
   @keyframes bm-pulse { 50% { outline-color: rgba(255, 215, 106, .25); } }
+  /* The narration makes room for an open map instead of running under it. */
+  body.bm-open:not(.input-only) #text-scroll { padding-right: calc(var(--bm-w) + 32px); }
+  /* Narrow windows: the 340 px settings margin left the text column ~8 px wide
+     below ~600 px. Release it, and put an open map across the top instead. */
+  @media (max-width: 1000px) {
+    body:not(.input-only) #text-scroll { padding-right: 24px; }
+    body.bm-open:not(.input-only) #text-scroll { padding-right: 24px; padding-top: calc(34vh + 80px); }
+    body:not(.input-only) #battle-map { left: 16px; right: 16px; width: auto; top: 56px; height: 34vh; }
+  }
   /* On a phone the map sits in the page above the input, never over it. */
   body.input-only #battle-map {
     position: relative; top: auto; right: auto; width: auto; height: 34vh;
@@ -4885,9 +4895,13 @@ if (document.readyState === 'loading') {
 }
 
 function flushNewBlock() {
-  // Finalise the current block and start a fresh one next time
-  if (currentCursor && currentCursor.parentNode) {
-    currentCursor.parentNode.removeChild(currentCursor);
+  // Finalise the current block and start a fresh one next time.
+  // currentCursor is the last PARAGRAPH (marked with the typing-cursor
+  // class), not a separate cursor element — removing it deleted the block's
+  // last paragraph whenever narration ended on its own, so a turn's closing
+  // "…what do you do?" vanished from the TV ~3.6 s after it was typed.
+  if (currentCursor) {
+    currentCursor.classList.remove('typing-cursor');
     currentCursor = null;
   }
   // Add a soft divider if there was content
@@ -6833,12 +6847,27 @@ function _ttsBlockVoice(blockEl) {
   return (blockEl && blockEl.dataset && blockEl.dataset.voice) || _ttsVoice;
 }
 
+// Gemini is out of quota (the free tier allows 10 voice requests a day): use
+// the browser's voice until it resets, and say so once rather than switching
+// voices without a word. Called from the server's broadcast and from a 429
+// reply, so a page opened after the quota ran out still knows.
+function _ttsQuotaNotice(secs) {
+  secs = Math.max(60, Number(secs) || 60);
+  _ttsRetryAt = Date.now() + secs * 1000; _ttsServerOk = false;   // until the quota resets
+  if (window._ttsQuotaNoted) return;
+  window._ttsQuotaNoted = true;
+  const when = secs >= 5400 ? `about ${Math.round(secs / 3600)} h` : `about ${Math.round(secs / 60)} min`;
+  const why = secs >= 5400 ? "today's free Gemini voice quota is used up" : 'the Gemini voice is rate-limited';
+  if (typeof _showToast === 'function') _showToast(`Narration: ${why} — using this browser's voice for ${when}`, 9000);
+}
+
 function _ttsFetchPcm(text, voice) {
   return fetch('/tts', {
     method: 'POST',
     headers: _authHeaders(),
     body: JSON.stringify({ text, voice }),
   }).then(resp => {
+    if (resp.status === 429) _ttsQuotaNotice(resp.headers.get('Retry-After'));
     if (!resp.ok) throw new Error('TTS ' + resp.status);
     return resp.arrayBuffer();
   });
@@ -6919,6 +6948,7 @@ async function _ttsPlayBlock(btn, blockEl) {
       // Anything else (429, 502, a dropped connection) is transient: fall
       // back for this block and try the server again on the next one.
       if (err.message === 'TTS 503') { _ttsServerOk = false; _ttsRetryAt = Date.now() + 60000; }
+      if (err.message === 'TTS 429') { _ttsServerOk = false; _ttsRetryAt = Math.max(_ttsRetryAt, Date.now() + 60000); }
       _ttsBrowserSpeak(btn, text);
       return;
     }
@@ -7527,6 +7557,7 @@ function _bmEnsurePanel() {
                     '<div class="bm-stage"><div class="bm-board"></div></div>';
   panel.querySelector('.bm-head').addEventListener('click', () => {
     panel.classList.toggle('bm-collapsed');
+    document.body.classList.toggle('bm-open', !panel.classList.contains('bm-collapsed'));
     try { localStorage.setItem('dnd_bm_collapsed', panel.classList.contains('bm-collapsed') ? '1' : '0'); } catch (_) {}
     if (!panel.classList.contains('bm-collapsed')) _bmRender();
   });
@@ -7575,6 +7606,7 @@ function _bmDrawCells(canvas, m, cs) {
 function _bmRender() {
   const m = _bmState.map;
   const panel = _bmEnsurePanel();
+  document.body.classList.toggle('bm-open', !!m && !panel.classList.contains('bm-collapsed'));
   if (!m) { panel.hidden = true; return; }
   panel.hidden = false;
   // The turn order's round (send.py --turn "round", push_stats --turn-round)
@@ -8100,6 +8132,7 @@ function connect() {
       }
     }
     if (payload.tts_available) { _ttsServerOk = true; _ttsRetryAt = 0; }
+    if (payload.tts_quota) _ttsQuotaNotice(Number(payload.tts_quota.retry_after) || 60);
     if (payload.awaiting !== undefined) {
       _awaitingNames = payload.awaiting;
       _renderStagedQueue(_stagedData);

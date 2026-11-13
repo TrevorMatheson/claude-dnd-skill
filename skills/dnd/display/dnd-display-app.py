@@ -1350,6 +1350,7 @@ def health():
         "clients": client_count,
         # Whether this server can use the voice key (never the key itself).
         "tts_key": bool(_tts is not None and _tts.key_source() != "unset"),
+        "tts_quota_wait": max(0, int(_tts_quota_until - _time.time())),
     }, 200
 
 
@@ -2158,14 +2159,25 @@ def _write_narrator_voice(voice: str) -> bool:
         return False
 
 
+_tts_quota_until = 0.0   # time.time() before which Gemini is known to be out of quota
+
+
+def _tts_quota_response():
+    left = max(0, int(_tts_quota_until - _time.time()))
+    return Response(f"TTS quota used up; resets in about {left // 60} min", status=429,
+                    headers={"Retry-After": str(left), "X-TTS-Quota": "exhausted"})
+
+
 @app.route("/tts", methods=["POST"])
 def tts_synthesize():
     """Synthesize a narrator/NPC block to L16 PCM.
 
     Body: {"text": str, "voice": str (optional)}
     Response: raw L16 PCM bytes, Content-Type: audio/L16;codec=pcm;rate=24000
-    Failures: 503 (no key / module unavailable), 400 (bad input), 502 (upstream)
+    Failures: 503 (no key / module unavailable), 400 (bad input), 502 (upstream),
+    429 (Gemini quota used up — the page uses the browser voice until it resets)
     """
+    global _tts_quota_until
     if _tts is None:
         return "TTS module unavailable", 503
     if not _token_ok():
@@ -2183,9 +2195,25 @@ def tts_synthesize():
         voice = _tts.DEFAULT_VOICE
     if _tts.key_source() == "unset":
         return "TTS not configured (see docs/SKILL-tts.md)", 503
+    if _time.time() < _tts_quota_until:
+        # A cached clip still plays: only a new line would hit the quota.
+        cached = _tts.cache_get(_tts.cache_key(voice, text))
+        if cached is None:
+            return _tts_quota_response()
+        return Response(cached, mimetype="audio/L16;codec=pcm;rate=24000",
+                        headers={"X-Audio-Voice": voice, "Cache-Control": "no-store"})
     try:
         pcm = _tts.synthesize_strict(text, voice)
     except _tts.TtsError as e:
+        if getattr(e, "status", 0) == 429:
+            # Out of Gemini quota. The free tier allows 10 voice requests a
+            # day for this model, so a few turns use it up. Stop calling
+            # until it resets, and tell every screen once.
+            wait = e.retry_after or (3600 if e.daily_quota else 60)
+            _tts_quota_until = _time.time() + wait
+            _broadcast({"tts_quota": {"daily": e.daily_quota, "retry_after": int(wait),
+                                      "quota": e.quota_id}})
+            return _tts_quota_response()
         return f"TTS upstream: {e}", 502
     return Response(
         pcm,
@@ -2997,7 +3025,9 @@ if __name__ == "__main__":
     if _tts is not None:
         threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
 
-    host = "0.0.0.0" if _LAN_MODE else "localhost"
+    # 127.0.0.1, not "localhost": say exactly which address is bound (the
+    # scripts connect there; see display_url.py).
+    host = "0.0.0.0" if _LAN_MODE else "127.0.0.1"
     # TLS — only enabled when --tls is explicitly passed; HTTP is the default.
     # Certs are runtime state (persist across plugin updates) → rt(); .scheme is a
     # launch-time marker read by simple shell commands → stays in the code dir.

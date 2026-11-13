@@ -44,6 +44,9 @@ def _check(results, name, status, detail, fix=""):
 
 
 def _get_json(url: str, timeout: float = 2.0):
+    from display_url import display_up
+    if not display_up(url):
+        return None
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8") or "{}")
@@ -119,10 +122,17 @@ def check_tts(results, health):
         else:
             _check(results, "display voice", OK,
                    "the running display can use the key" if health["tts_key"] else "browser voice")
+        wait = int(health.get("tts_quota_wait") or 0)
+        if wait:
+            _check(results, "voice quota", WARN,
+                   f"Gemini quota used up — browser voice for about {max(1, round(wait / 3600))} h "
+                   "(the free tier allows 10 voice requests a day; a turn uses 3–4)",
+                   "enable billing on the key's Google AI Studio project, or play the TV in "
+                   "Microsoft Edge, whose free 'Natural' voices are the best fallback")
 
 
 def check_display(results):
-    health = _get_json("http://localhost:5001/health")
+    health = _get_json("http://127.0.0.1:5001/health")
     if health is None:
         _check(results, "display (localhost)", WARN, "not running",
                f'"{sys.executable}" "{HERE.parent / "display" / "start_display.py"}" --lan')
