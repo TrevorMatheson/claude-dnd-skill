@@ -193,9 +193,9 @@ Resolve `~` to the user's home directory. Scripts locate both roots via
 | Tier | Model | When to use |
 |------|-------|-------------|
 | **Script** | Python only | Dice, HP math, XP, level-up, initiative, conditions, date, data lookup, stat display |
-| **Haiku** | `claude-haiku-4-5-20251001` | Formatting only: XP summaries, NPC attitude lines, quest one-liners |
-| **Sonnet** | `claude-sonnet-4-6` (session default) | All DM work: narration, NPC dialogue, skill outcomes, plot decisions, combat |
-| **Opus** | `claude-opus-4-6` | `/dm:dnd new` world generation; `/dm:dnd character new` pillar derivation |
+| **Haiku** | `haiku` (CLI alias — current Haiku) | Formatting only: XP summaries, NPC attitude lines, quest one-liners |
+| **Sonnet** | `sonnet` (or the session default) | All DM work: narration, NPC dialogue, skill outcomes, plot decisions, combat |
+| **Opus** | `opus` | `/dm:dnd new` world generation; `/dm:dnd character new` pillar derivation |
 
 **Script-first rule:** Before reaching for the LLM for any calculation, check whether a script handles it:
 `dice.py` · `combat.py` · `ability-scores.py` · `character.py` · `tracker.py` · `calendar.py` · `lookup.py` · `push_stats.py`
