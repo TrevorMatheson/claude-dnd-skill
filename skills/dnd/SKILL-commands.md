@@ -15,8 +15,8 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 
    **Q1 *"Display & input mode?"***
    - `No display` → continue without display.
-   - `Display (local)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh`, print URL, set `_display_running = true`, then `python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --clear`.
-   - `Display (LAN)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan`, print both URLs, set `_display_running = true`, then `--clear` as above.
+   - `Display (local)` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py`, print URL, set `_display_running = true`, then `python ${CLAUDE_SKILL_DIR}/display/push_stats.py --clear`.
+   - `Display (LAN)` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py --lan`, print the TV and phone URLs it prints, set `_display_running = true`, then `--clear` as above.
    - `Display + autorun (LAN)` → as **Display (LAN)**, and write `autorun: true` to `state.md → ## Session Flags`.
 
    **Q2 *"Dice rolls?"*** — set how PC d20s are handled (see SKILL.md "Dice convention"):
@@ -76,8 +76,8 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 
    **Q1 *"Display & input mode?"***
    - `No display` → continue without display.
-   - `Display (local)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh`, print URL, set `_display_running = true`.
-   - `Display (LAN)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan`, print both URLs, set `_display_running = true`.
+   - `Display (local)` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py`, print URL, set `_display_running = true`.
+   - `Display (LAN)` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py --lan`, print the TV and phone URLs it prints, set `_display_running = true`.
    - `Display + autorun (LAN)` → as **Display (LAN)**, and also write `autorun: true` to `state.md → ## Session Flags`; enter the autorun wait after the recap.
 
    **Q2 *"Dice rolls?"*** — confirm how PC d20s are handled this session (see SKILL.md "Dice convention"). Pre-fill the recommended option from the existing `roll_mode` in `state.md` if present, else `players`:
@@ -259,7 +259,7 @@ Then update `## Faction Moves` in state.md: for each active faction, answer *"wh
 
 1. Verify the campaign-side file exists and is non-empty:
    ```bash
-   bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>
+   python ${CLAUDE_SKILL_DIR}/display/verify_tail.py <campaign-name>
    ```
    The script returns 0 if the tail is healthy (non-empty + valid JSON list), 1 if missing/empty/corrupt. If it returns 1, the tail is unsafe to rely on for next session's replay — **write a canonical replacement directly to the campaign path** with this session's 5–8 most important narrative beats as a JSON list of `{"text": "...", "_camp": "<name>"}` entries (no display call needed; the display may already be dead). Use the `${CLAUDE_SKILL_DIR}/display/write_canonical_tail.py` helper.
 2. Also write `~/.claude/dnd/campaigns/<name>/session-tail.md` (human-readable snapshot — companion to the JSON, used as fallback during /dm:dnd load if JSON read fails).
@@ -333,7 +333,7 @@ If `graph.json` doesn't exist yet for this campaign, skip the sweep entirely (no
       iv. Update `steering_notes` for the next outstanding beat with the *consequence shape* expected, not the specific event.
    f. **Tail verification (added 2026-05-01):** before killing the display, verify the campaign-side `session_tail.json` is healthy:
       ```bash
-      bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>
+      python ${CLAUDE_SKILL_DIR}/display/verify_tail.py <campaign-name>
       ```
       Exit 0 = healthy. Exit 1 = missing/empty/corrupt → write a canonical replacement to `~/.claude/dnd/campaigns/<name>/session_tail.json` from session context (5–8 entries, each `{"text": "...", "_camp": "<name>"}`) BEFORE the display kill — once the display is dead, only the file matters. The display's own `_persist_tail` has skip-on-empty + atomic-write guards, but the backstop ensures a worst-case file state is impossible.
 2. Stop the display (always — even if `_display_running` was unclear):
@@ -341,7 +341,7 @@ If `graph.json` doesn't exist yet for this campaign, skip the sweep entirely (no
    kill $(cat ${CLAUDE_SKILL_DIR}/display/app.pid 2>/dev/null) 2>/dev/null
    rm -f ${CLAUDE_SKILL_DIR}/display/app.pid
    ```
-3. **Post-kill tail re-verification:** run `verify_tail.sh` once more after the kill. If it now reports unhealthy (file got truncated by a final write race), restore from the canonical version written in step 1f.
+3. **Post-kill tail re-verification:** run `verify_tail.py` once more after the kill. If it now reports unhealthy (file got truncated by a final write race), restore from the canonical version written in step 1f.
 
 ---
 

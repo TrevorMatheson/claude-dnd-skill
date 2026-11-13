@@ -394,12 +394,10 @@ Browser tab → Chromecast → TV
 
 **Start the display:**
 ```bash
-bash ${CLAUDE_SKILL_DIR}/display/start-display.sh          # localhost
-bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan    # LAN mode (phones, tablets)
-open https://localhost:5001                                  # open browser before /dm:dnd load
+python ${CLAUDE_SKILL_DIR}/display/start_display.py          # localhost
+python ${CLAUDE_SKILL_DIR}/display/start_display.py --lan    # LAN mode (phones, tablets) — prints the URLs
 ```
-
-`start-display.sh` always force-kills any previous instance before starting — no manual pre-kill needed.
+Open the printed URL in the TV's browser before `/dm:dnd load`. `start_display.py` stops any previous instance first — no manual pre-kill needed. (`start-display.sh --lan --tls` remains for HTTPS on macOS / Linux.)
 
 **Load a campaign:**
 ```

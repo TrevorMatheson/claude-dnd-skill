@@ -35,7 +35,10 @@ HOOK_EVENT = "Stop"
 def checkpoint_command() -> str:
     """Absolute command the hook runs. Resolved at install time."""
     script = paths.scripts_dir() / "autosave_checkpoint.py"
-    return f'python3 "{script}"'
+    # The interpreter running this install, by full path: a bare `python3` is
+    # the Microsoft Store stub on many Windows machines, and the hook would
+    # fail on every turn without a word.
+    return f'"{sys.executable}" "{script}"'
 
 
 def default_settings_path() -> str:
