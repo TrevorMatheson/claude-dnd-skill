@@ -512,10 +512,17 @@ Pull the latest skill changes from `origin/main`.
 ---
 
 ## `/dm:dnd display [start|stop|status]`
-- `start` → ask LAN mode [y/n]; run `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh [--lan]`; print URL(s)
-- `stop` → `kill $(cat ${CLAUDE_SKILL_DIR}/display/app.pid) 2>/dev/null && rm -f ${CLAUDE_SKILL_DIR}/display/app.pid`
-- `status` → `curl -sk $(cat ${CLAUDE_SKILL_DIR}/display/.scheme 2>/dev/null || echo http)://localhost:5001/ping` — reachable or unreachable
+Use the Python launcher on every platform — it runs with whatever interpreter runs it (`python`, `py` or `python3`; on Windows `python3` is often the Store stub), finds the real LAN adapter (skipping VMware / Hyper-V / WSL ones) and prints the TV and phone URLs:
+- `start` → ask LAN mode [y/n]; run `python ${CLAUDE_SKILL_DIR}/display/start_display.py [--lan]`; relay the URLs it prints
+- `stop` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py stop`
+- `status` → `python ${CLAUDE_SKILL_DIR}/display/start_display.py status`
+- TLS (`--lan --tls`, needs openssl) is still `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan --tls` on macOS / Linux
 - No argument → print quick-start instructions
+
+---
+
+## `/dm:dnd doctor [--deep]`
+The table check before players arrive: `python ${CLAUDE_SKILL_DIR}/scripts/doctor.py [--deep]`. It checks Python, Flask / flask-cors / PyYAML, the 2014 and 2024 datasets (spell and feature counts), the voice key and whether the running display can use it, the display on localhost and on the LAN address phones use, the Windows firewall rule for port 5001, and the `claude` CLI DM Help needs (`--deep` asks it for a one-word reply to prove it is signed in). Relay each `!` / `✗` line with its `→` fix. Never run a fix that changes a system or security setting (the firewall rule) yourself — show the command for the user to run.
 
 ---
 

@@ -580,4 +580,6 @@ The tutor block always goes **last** in the Bash send sequence.
 
 **Scripting and rolls:** Run scripts, rolls, and simple expansions immediately — no confirmation prompts. Only pause for genuinely consequential operations (e.g. deleting campaign data).
 
+**Python on Windows:** the examples say `python3`; on Windows use `python` (or `py`) — `python3` there is often the Microsoft Store stub. Every script also works when run with `sys.executable` of an already-working interpreter.
+
 **Reference modules:** For full script syntax, Read `${CLAUDE_SKILL_DIR}/SKILL-scripts.md`. For full command procedures, Read `${CLAUDE_SKILL_DIR}/SKILL-commands.md`. Load both at `/dm:dnd load`.

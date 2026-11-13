@@ -1348,6 +1348,8 @@ def health():
         "text_log": log_count,
         "campaign": camp,
         "clients": client_count,
+        # Whether this server can use the voice key (never the key itself).
+        "tts_key": bool(_tts is not None and _tts.key_source() != "unset"),
     }, 200
 
 
