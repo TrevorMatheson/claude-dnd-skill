@@ -147,6 +147,12 @@ Three optional settings in `state.md → ## Session Flags` let a table tune the 
 
 ---
 
+## D&D Beyond Maps (VTT)
+
+If the table plays on D&D Beyond Maps, the sibling `maps` skill (`/dm:maps`) puts scenes on the VTT by driving the Maps page in the browser. When the party reaches a new location or a fight starts and `<campaign-dir>/vtt.md` exists (meaning this campaign uses Maps), offer once in a short line to update the map; on a yes, invoke `/dm:maps`. Never block narration on it.
+
+---
+
 ## Directory Layout
 
 **Code & assets** live in the skill directory. `${CLAUDE_SKILL_DIR}` is substituted
