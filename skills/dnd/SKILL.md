@@ -322,6 +322,23 @@ Roll handling is chosen at game start and stored as `roll_mode` in `state.md →
 
 **Display sync (when `_display_running = true`):**
 
+**Preferred: one call per turn.** Roll your dice first, then send the whole turn — player echo, dice lines, narration, NPC lines, tutor hint, stat changes, whose turn it is and who must act — in one `send.py --turn` call. Blocks arrive in the order listed; stats, turn pointer and `awaiting` follow the blocks; an optional `dice_request` comes last (with `"wait": true` it prints the roll like `--dice-request --wait`). Write the JSON to a file with the Write tool, or pipe it with `--turn -`:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/display/send.py --turn "$CAMP_DIR/.turn.json"
+```
+```json
+{"blocks": [
+   {"action": "Havoc", "text": "Havoc lunges at the rat."},
+   {"dice": true, "text": "Havoc — Longsword: d20+5 = 21 vs AC 12 → hit, 7 slashing"},
+   {"text": "The blade catches the rat mid-leap..."},
+   {"npc": "Mira", "text": "Two more in the rafters!"},
+   {"tutor": true, "text": "Anony: a Dexterity save is d20 + your DEX save bonus; 13 or more succeeds."}],
+ "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
+ "turn": "Anony", "awaiting": ["Anony"],
+ "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3, "label": "Dex save", "dc": 13, "wait": true}}
+```
+`awaiting` names whose Send ends the turn — that player's single Send goes through without the others pressing skip. Use `"party"` when everyone should answer. Without it, a `turn` pointing at a PC does the same. A bad block (no text, two kinds, unknown key) rejects the whole turn before anything is sent. The single-purpose sends below still work.
+
 *Player actions* — before responding, send a cleaned version to the display:
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/display/send.py --player <CharacterName> << 'DNDEND'

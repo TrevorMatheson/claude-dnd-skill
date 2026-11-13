@@ -337,6 +337,24 @@ _staged: dict[str, dict] = {}   # {char_name: {text, ready, timestamp}}
 _staged_lock = threading.Lock()
 _expected_count = 1             # updated when stats arrive; min 1
 _autorun_threshold: Optional[int] = None  # overrides _expected_count when set via push_stats --autorun-threshold
+# Who the DM is waiting on. Set explicitly by a stats payload {"awaiting": [...]}
+# (send.py --turn), else taken from turn_order.current. When someone is awaited,
+# their Send alone completes the turn: the rest of the party no longer has to
+# press "skip", and the DM no longer has to remember --autorun-threshold 1.
+_awaiting: Optional[list] = None
+
+
+def _awaited_names() -> Optional[list]:
+    """Names the auto-trigger waits for, or None for "the whole party"."""
+    if _awaiting:
+        return list(_awaiting)
+    with _stats_lock:
+        to = _current_stats.get("turn_order") or {}
+        known = {p.get("name", "").lower() for p in _current_stats.get("players", [])}
+    cur = to.get("current") if isinstance(to, dict) else None
+    if cur and cur.lower() in known:
+        return [cur]
+    return None
 
 # Tracks which character names are currently sitting in .input_queue waiting
 # for the DM to press Enter. Set when queue is written, cleared when wrapper
@@ -384,15 +402,24 @@ def _check_auto_trigger() -> None:
         if not _staged:
             return
         everybody_ready = "Everybody" in _staged and _staged["Everybody"]["ready"]
-        all_ready       = all(v["ready"] for v in _staged.values())
-        threshold       = _autorun_threshold if _autorun_threshold is not None else _expected_count
-        enough          = len(_staged) >= threshold or everybody_ready
-        if not (all_ready and enough):
-            return
-        char_names = list(_staged.keys())
-        lines      = [f'[{c}]: {e["text"]}' for c, e in _staged.items()]
+        awaited         = _awaited_names()
+        if awaited and not everybody_ready:
+            ready_ci = {c.lower() for c, v in _staged.items() if v["ready"]}
+            if not all(n.lower() in ready_ci for n in awaited):
+                return
+            taken = [c for c, v in _staged.items() if v["ready"]]
+        else:
+            all_ready = all(v["ready"] for v in _staged.values())
+            threshold = _autorun_threshold if _autorun_threshold is not None else _expected_count
+            enough    = len(_staged) >= threshold or everybody_ready
+            if not (all_ready and enough):
+                return
+            taken = list(_staged.keys())
+        char_names = taken
+        lines      = [f'[{c}]: {_staged[c]["text"]}' for c in taken]
         content    = "\n".join(lines)
-        _staged.clear()
+        for c in taken:
+            _staged.pop(c, None)
 
     try:
         with open(QUEUE_FILE, "w", encoding="utf-8") as f:
@@ -1489,6 +1516,18 @@ def stats():
     if not data:
         return "", 204
 
+    if "awaiting" in data:
+        global _awaiting
+        aw = data["awaiting"]
+        if isinstance(aw, str):
+            aw = ([] if aw.strip().lower() in ("", "party", "all", "everyone")
+                  else [n.strip() for n in aw.split(",") if n.strip()])
+        _awaiting = [str(n)[:50] for n in aw] if aw else None
+        _broadcast({"awaiting": _awaiting})
+        if len(data) == 1:
+            _check_auto_trigger()
+            return "", 204
+
     _effect_expire_events: list[dict] = []
     with _stats_lock:
         if "players" in data:
@@ -2499,7 +2538,10 @@ def stage_input():
         return "Forbidden", 403
 
     # In solo mode (1 expected player), skip the manual Ready step and auto-trigger.
-    solo = (_expected_count == 1)
+    # The same when the DM is waiting on exactly this character (their turn).
+    awaited = _awaited_names()
+    solo = (_expected_count == 1) or bool(
+        awaited and len(awaited) == 1 and awaited[0].lower() == character.lower())
 
     with _staged_lock:
         _staged[character] = {
@@ -2753,6 +2795,8 @@ def stream():
     # Replay threshold so the ready counter reflects the correct target on reconnect.
     if _autorun_threshold is not None:
         q.put_nowait({"autorun_threshold": _autorun_threshold})
+    if _awaiting:
+        q.put_nowait({"awaiting": list(_awaiting)})
 
     # Send any pending device approval requests so the DM sees them on reconnect.
     with _devices_lock:

@@ -7111,6 +7111,7 @@ const _waitingEl       = document.getElementById('waiting-indicator');
 let _selectedChar     = 'Everybody';
 let _stagedData       = {};   // {char: {text, ready, timestamp}} — mirror of server state
 let _autorunThreshold = null; // null = use player count; int = explicit threshold
+let _awaitingNames = null;    // names the DM is waiting on (server "awaiting"), null = party
 
 // ── Toggle open/closed ────────────────────────────────────────────
 _inputPanelHdr.addEventListener('click', () => {
@@ -7242,7 +7243,8 @@ function _renderStagedQueue(data) {
   const anyReady   = readyCount > 0;
   // Derive display threshold: explicit override, or infer from total known players
   const knownCount = (_charTabs ? _charTabs.querySelectorAll('.char-tab').length - 1 : 1); // excl. Everybody
-  const threshold  = _autorunThreshold !== null ? _autorunThreshold : Math.max(1, knownCount);
+  const threshold  = (_awaitingNames && _awaitingNames.length) ? _awaitingNames.length
+                   : _autorunThreshold !== null ? _autorunThreshold : Math.max(1, knownCount);
   const needMore   = readyCount < threshold && !entries.some(([c, v]) => c === 'Everybody' && v.ready);
 
   if (anyReady && notReady.length > 0) {
@@ -7754,6 +7756,10 @@ function connect() {
           if (el && el.dataset.state === 'resolving') { el.dataset.state = ''; _refreshPhoneStatus(); }
         }, 8000);
       }
+    }
+    if (payload.awaiting !== undefined) {
+      _awaitingNames = payload.awaiting;
+      _renderStagedQueue(_stagedData);
     }
     if (payload.autorun_threshold !== undefined) {
       _autorunThreshold = payload.autorun_threshold;
