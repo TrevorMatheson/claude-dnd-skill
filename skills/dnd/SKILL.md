@@ -53,7 +53,7 @@ When the skill is invoked **without a clear action** — a bare `/dm:dnd`, or a 
 > **Question:** "What would you like to do?"
 > **Options:** `Load a campaign` · `Start a new campaign` · `Import a campaign` · `Manage a character`
 
-Then branch to the matching procedure in `SKILL-commands.md` (`/dm:dnd load`, `/dm:dnd new`, `/dm:dnd import`, `/dm:dnd character …`).
+Then branch to the matching procedure in `SKILL-commands.md` (`/dm:dnd load`, `/dm:dnd new`, `/dm:dnd character …`) or, for `/dm:dnd import`, in `SKILL-reference.md`.
 
 **Skip the menu when the intent is already explicit.** If the player typed a subcommand (`/dm:dnd load`, `/dm:dnd new …`) or named a campaign (`/dm:dnd load the-iron-vault`, *"load my pirate campaign"*), go straight to that procedure — do not ask. The menu is for the empty/ambiguous case only; never make a player who already told you what they want pick it from a list.
 
@@ -186,7 +186,10 @@ skill, or a dev clone).
 ${CLAUDE_SKILL_DIR}/                 ← the skill dir (plugin: <plugin>/skills/dnd/)
   SKILL.md           ← core DM rules (this file)
   SKILL-scripts.md   ← all Python script syntax (load at session start)
-  SKILL-commands.md  ← all /dm:dnd command procedures (load at session start)
+  SKILL-commands.md  ← /dm:dnd command procedures used every session (load at session start)
+  SKILL-reference.md ← rarely used commands and scripts: import, graph, oracle, registry,
+                       rename, path/update/data, recap, display setup, autosave, corpus
+                       (read on demand, never at load)
   scripts/           ← dice.py, combat.py, character.py, tracker.py, calendar.py, lookup.py
   data/              ← bundled 5e SRD dataset (dnd5e_srd.json — no download needed; sync via /dm:dnd data sync)
   templates/         ← blank character-sheet.md, state.md, world.md, npcs.md, session-log.md
@@ -582,4 +585,4 @@ The tutor block always goes **last** in the Bash send sequence.
 
 **Python on Windows:** the examples say `python3`; on Windows use `python` (or `py`) — `python3` there is often the Microsoft Store stub. Every script also works when run with `sys.executable` of an already-working interpreter.
 
-**Reference modules:** For full script syntax, Read `${CLAUDE_SKILL_DIR}/SKILL-scripts.md`. For full command procedures, Read `${CLAUDE_SKILL_DIR}/SKILL-commands.md`. Load both at `/dm:dnd load`.
+**Reference modules:** For full script syntax, Read `${CLAUDE_SKILL_DIR}/SKILL-scripts.md`. For full command procedures, Read `${CLAUDE_SKILL_DIR}/SKILL-commands.md`. Load both at `/dm:dnd load`. Read `${CLAUDE_SKILL_DIR}/SKILL-reference.md` only when a command or script it covers is used (module import, graph, oracle, name registry, NPC rename, path / update / data, recap snapshots, display setup, autosave, corpus) — leaving it out keeps the session's context free for narration.

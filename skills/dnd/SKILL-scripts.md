@@ -6,6 +6,10 @@ Full syntax for all Python helper scripts. Load this file once at `/dm:dnd load`
 
 ---
 
+> **Rarely used scripts are in `SKILL-reference.md`** (read on demand): Session Recap — `scripts/session_recap.py`; Oracle — `scripts/oracle.py`; Deterministic Graph Extraction — `scripts/graph_extract_deterministic.py`; Display Companion Setup (one-time); Continuity Autosave — `scripts/autosave_checkpoint.py`, `scripts/install_autosave_hook.py`; Lazy Corpus — `scripts/corpus_check.py`.
+
+---
+
 ## Dice Script — `scripts/dice.py`
 
 **MANDATORY.** Every die roll in play — player checks, NPC attacks, saves, damage, ability score gen, anything — must be produced by invoking this script via Bash. **Never sample dice mentally or with inline `random` calls.** The script routes rolls through a local physical-dice server that may surface them on the player's phone for them to cast; rolling in your head bypasses that and breaks the ritual. If the server isn't running the script falls back to local random — so there is no scenario where the script should be skipped.
@@ -407,81 +411,6 @@ Default files searched: state, log, archive, world, npcs
 
 ---
 
-## Session Recap — `scripts/session_recap.py`
-
-Deterministic state-diff between two character snapshots. Computes the mechanical change set (HP/temp/level/hit dice/death saves/conditions/concentration/exhaustion/inspiration/spell slots) from data so narration never recomputes it — recaps are the single thing an LLM is most likely to hallucinate. Reads `<campaign>/characters/*.md` and merges live `tracker.json` conditions/concentration. Zero LLM calls.
-
-```bash
-CAMP=my-campaign
-
-# Snapshot the party now — sets the baseline (writes to <campaign>/.recap/,
-# rolling last → prev). Run this at session START (e.g. /dm:dnd load) so there
-# is a baseline to diff against later.
-python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py snapshot --campaign $CAMP
-
-# Diff the baseline against current state → one-paragraph summary, then ADVANCE
-# the baseline to "now" so the next diff chains from here. Run at /dm:dnd save
-# (end of session) for a since-start recap, or each turn for a since-last-turn
-# recap — either way it advances, so consecutive diffs never re-report old deltas.
-python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff --campaign $CAMP
-# → "Aldric: took 18 damage (30→12 HP); gained Poisoned; spent 2 level 1 slots."
-
-# Same comparison without moving the baseline (ad-hoc "what changed so far?"):
-python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff --campaign $CAMP --no-roll
-
-# Structured change list instead of prose:
-python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff --campaign $CAMP --json
-
-# Diff two snapshot files directly (no campaign lookup):
-python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff-files before.json after.json
-```
-
----
-
-## Oracle — `scripts/oracle.py`
-
-Dice-driven solo/improv oracles (Mythic chaos factor, Ironsworn yes/no, Random Event Focus, scene-meaning word pairs). Keeps pacing transparent and rollable instead of invented. Rolls are stdlib-random and seedable (`--seed N`). The chaos factor persists in `state.md → ## Session Flags` as `chaos_factor: N`. Zero LLM calls.
-
-```bash
-CAMP=my-campaign
-
-# Chaos factor (1-9): show / set / adjust (persisted to state.md)
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py chaos --campaign $CAMP
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py chaos set --campaign $CAMP --value 7
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py chaos adjust --campaign $CAMP --pc-lost
-
-# Yes/no oracle — likelihood + chaos modifier → verdict + d100
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py ask --likelihood likely --campaign $CAMP
-# → "NO-BUT  (d100=82, likelihood=likely, chaos=8)"
-
-# Random Event Focus (d100 → direction label)
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py event
-
-# Scene-meaning word pair (action / subject)
-python3 ${CLAUDE_SKILL_DIR}/scripts/oracle.py scene
-```
-
-Likelihoods: `sure-thing`, `likely`, `50/50`, `unlikely`, `no-way`. Verdict suffixes: `-and` (extreme, on doubles), `-but` (qualified, near threshold).
-
----
-
-## Deterministic Graph Extraction — `scripts/graph_extract_deterministic.py`
-
-Zero-LLM relationship extractor. Pattern-matches session-log sentences against the bundled verb-table seed (`data/graph/verb_table_seed.yaml`) and emits typed edge proposals in the exact shape `campaign_graph.py` consumes. ~50% recall (clean subject-verb-object only), ~95% precision, no Claude API call. Usually driven through `campaign_graph.py extract --deterministic` rather than directly:
-
-```bash
-CAMP=my-campaign
-
-# Propose edges (stdout), no writes:
-python3 ${CLAUDE_SKILL_DIR}/scripts/campaign_graph.py extract --campaign $CAMP --deterministic
-
-# One-shot auto-apply high-confidence proposals into graph.json (idempotent):
-python3 ${CLAUDE_SKILL_DIR}/scripts/campaign_graph.py extract --campaign $CAMP \
-    --deterministic --apply --min-confidence high
-```
-
----
-
 ## Data Commands — `scripts/sync_srd.py`, `scripts/build_srd.py`, and `scripts/lookup.py`
 
 Dataset is bundled at `${CLAUDE_SKILL_DIR}/data/dnd5e_srd.json`. No runtime download required.
@@ -515,79 +444,3 @@ suggest("poisonned", category="condition")            # → [("Poisoned", "condi
 
 ---
 
-## Display Companion Setup (one-time)
-
-```bash
-cd ${CLAUDE_SKILL_DIR}/display
-pip3 install -r requirements.txt
-```
-
-```
-Terminal (run claude directly — no wrapper needed)
-    ↓ send.py calls per narration block / dice roll / stat change
-Flask on https://localhost:5001 (dnd-display-app.py — HTTPS, self-signed cert)
-    ↓ Server-Sent Events
-Browser tab → Chromecast → TV
-```
-
-**Start the display:**
-```bash
-bash ${CLAUDE_SKILL_DIR}/display/start-display.sh          # localhost
-bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan    # LAN mode (phones, tablets)
-open https://localhost:5001                                  # open browser before /dm:dnd load
-```
-
-`start-display.sh` always force-kills any previous instance before starting — no manual pre-kill needed.
-
-**Load a campaign:**
-```
-/dm:dnd load <campaign-name>   # skill auto-detects running display, pushes party stats
-```
-
-The DM skill sends each narration block, dice result, and stat update via `send.py` calls (see Active DM Mode in SKILL.md for full send sequence and stat flag reference).
-
-Open the browser tab and Chromecast it *before* running `/dm:dnd load` so the browser is connected when the opening narration streams in. The display buffers the last 60 chunks and replays them to reconnecting browsers.
-
-**Scene detection:** server scans narration for keywords and shifts background gradient + particle type (17 scenes: tavern, dungeon, forest, crypt, arcane, ocean, etc.). Crossfades over ~2.5 s.
-
-**Audio (Python-side):** `audio.py` auto-imported by `dnd-display-app.py`. Two toggles: Ambient (looping soundscape) and Effects (one-shot SFX). Both default off. Scene changes crossfade the ambient loop. All synthesis via numpy — no audio files needed.
-
----
-
-## Continuity Autosave — `scripts/autosave_checkpoint.py`, `scripts/install_autosave_hook.py`
-
-Behind-the-scenes continuity checkpoint for long sessions, so a context compaction never loses the player's place. Two layers; see the *Continuity micro-save* rule in SKILL.md and the `/dm:dnd autosave` command.
-
-```bash
-# Opt-in: register the Stop hook (writes ~/.claude/settings.json, idempotent)
-python3 ${CLAUDE_SKILL_DIR}/scripts/install_autosave_hook.py
-python3 ${CLAUDE_SKILL_DIR}/scripts/install_autosave_hook.py --uninstall
-python3 ${CLAUDE_SKILL_DIR}/scripts/install_autosave_hook.py --status
-
-# The hook target (also runnable by hand to force a snapshot or inspect state)
-python3 ${CLAUDE_SKILL_DIR}/scripts/autosave_checkpoint.py --status
-python3 ${CLAUDE_SKILL_DIR}/scripts/autosave_checkpoint.py --campaign <name> --snapshot-only
-```
-
-`autosave_checkpoint.py` runs as a Claude Code **Stop hook** (after each turn). It reads the active campaign from `<runtime-dir>/active-campaign.json` (written at `/dm:dnd load`) and the `autosave` flag from that campaign's `state.md`. It **no-ops** when no campaign is active (e.g. a non-D&D session), when `autosave: off`, or when already inside a hook-driven continuation. Every turn it snapshots `state.md` to the runtime dir; every N turns (default 10, `DND_AUTOSAVE_EVERY` to override) it emits a Stop-hook `block` decision that prompts the DM to flush continuity before yielding. The hook is **opt-in** — the in-model micro-save cadence works without it.
-
-**When to use:** offer `install_autosave_hook.py` to players running long imported modules who hit compaction mid-session. The flag toggle (`/dm:dnd autosave on|off`) is the in-session control.
-
-## Lazy Corpus — `scripts/corpus_check.py`
-
-Imported (structured) campaigns keep the full module text as a lazily-loaded reference layer instead of inlining it. Layout:
-
-```
-<campaign>/
-  world.md           # load-time core (Foundations, Three Truths, factions)
-  world-nodes.md     # lazy: full Quest Seed Bank + Adventure Nodes (per-act read)
-  arc.md             # lazy: full act/chapter tree (state.md holds current+next only)
-  source-index.md    # chapter-id -> source file -> one-line scope
-  source/<id>.md     # lazy: one file per chapter, the module's source text
-```
-
-```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/corpus_check.py --campaign <name>
-```
-
-Validates that every chapter id in `source-index.md` has a matching `source/<id>.md` (and vice-versa) and that `arc.md` exists. Run it at the end of `/dm:dnd import`. A campaign with no `source/` layer (dynamic, sandbox, or a pre-v2.2.0 import) is reported as a clean no-op — nothing to validate, and its load path is unchanged.
