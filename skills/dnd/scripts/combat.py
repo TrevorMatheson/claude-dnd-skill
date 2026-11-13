@@ -43,6 +43,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import argparse
 import json
+import pathlib
 import os
 import secrets
 import sys
@@ -378,7 +379,63 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--effects", metavar="ENTITY",
                    help="add tracker.py attack/damage modifiers held by ENTITY")
     s.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"))
+    s.add_argument("--from", dest="attacker", metavar="NAME",
+                   help="attacker's token on the battle map (with --target: checks reach/range)")
+    s.add_argument("--target", metavar="NAME", help="target's token on the battle map")
+    s.add_argument("--reach", type=int, metavar="FT", help="melee reach in feet (default 5)")
+    s.add_argument("--range", dest="rng", metavar="NORMAL/LONG",
+                   help="ranged attack, e.g. 80/320: long range and a hostile within 5 ft give disadvantage")
     _mastery_args(s)
+
+    # ── battle map (battlemap.py) ──
+    def _camp(sp):
+        sp.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"), required=False)
+        sp.add_argument("--no-push", action="store_true", help="don't update the display's map")
+
+    s = sub.add_parser("map", help="battle map: init | show | clear | push")
+    s.add_argument("action", choices=["init", "show", "clear", "push"])
+    s.add_argument("--layout", metavar="FILE", help="text layout (# wall . floor ~ difficult T obstacle D door)")
+    s.add_argument("--size", metavar="WxH", help="plain grid of W by H squares")
+    s.add_argument("--image", metavar="PATH", help="background image, relative to the campaign dir (maps/x.png)")
+    s.add_argument("--place", action="store_true", help="place tokens for the layout's legend (a = Havoc)")
+    _camp(s)
+
+    s = sub.add_parser("place", help="put a token on a square")
+    s.add_argument("name")
+    s.add_argument("x", type=int)
+    s.add_argument("y", type=int)
+    s.add_argument("--pc", action="store_true", help="a player character (default: NPC/monster)")
+    s.add_argument("--speed", type=int, default=30)
+    s.add_argument("--size", type=int, default=1, help="squares per side (Large = 2)")
+    _camp(s)
+
+    s = sub.add_parser("move", help="move a token, checking walls and speed")
+    s.add_argument("name")
+    s.add_argument("x", type=int)
+    s.add_argument("y", type=int)
+    s.add_argument("--dash", action="store_true", help="Dash: double speed this turn")
+    s.add_argument("--force", action="store_true",
+                   help="forced movement (shove, Push) or a DM ruling: no speed or path check")
+    _camp(s)
+
+    s = sub.add_parser("turn", help="start a creature's turn: its movement is fresh")
+    s.add_argument("name")
+    s.add_argument("--round", type=int, help="also set the round number")
+    _camp(s)
+
+    s = sub.add_parser("dist", help="distance in feet between two tokens")
+    s.add_argument("a")
+    s.add_argument("b")
+    s.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"))
+
+    s = sub.add_parser("hp", help="set a token's hit points for its ring on the map")
+    s.add_argument("name")
+    s.add_argument("hp", metavar="CUR[/MAX]")
+    _camp(s)
+
+    s = sub.add_parser("remove", help="take a token off the map (dead, fled)")
+    s.add_argument("name")
+    _camp(s)
 
     sub.add_parser("masteries", help="list the 2024 weapon mastery properties")
 
@@ -398,8 +455,119 @@ def _mastery_args(s, with_name: bool = True):
     s.add_argument("--topple-dc", type=int)
 
 
+def _campaign_dir(name):
+    if not name:
+        raise SystemExit("combat.py: the battle map needs -c <campaign> (or $CAMPAIGN)")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from paths import find_campaign
+    d = find_campaign(name)
+    if not d.is_dir():
+        raise SystemExit(f"combat.py: no campaign directory {d}")
+    return d
+
+
+def push_map(m: dict) -> None:
+    """Send the map to the display (silently nothing when it isn't running)."""
+    import subprocess
+    import battlemap
+    push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
+    try:
+        subprocess.run([sys.executable, push, "--json", json.dumps({"map": battlemap.display_payload(m)})],
+                       capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
+def _map_cmd(a) -> int:
+    import battlemap as bm
+    camp = _campaign_dir(a.campaign)
+    try:
+        if a.cmd == "map" and a.action == "init":
+            legend, markers = {}, {}
+            if a.layout:
+                from utf8io import read_text
+                cells, markers, legend = bm.parse_layout(read_text(pathlib.Path(a.layout)))
+                m = bm.new_map(max(len(r) for r in cells), len(cells), cells, a.image)
+            elif a.size:
+                w, h = (int(v) for v in a.size.lower().split("x"))
+                m = bm.new_map(w, h, image=a.image)
+            else:
+                print("combat.py map init: give --layout FILE or --size WxH", file=sys.stderr)
+                return 2
+            if a.place:
+                for ch, (x, y) in markers.items():
+                    if ch in legend:
+                        name = legend[ch]
+                        bm.place(m, name, x, y, kind="pc" if ch.isupper() else "npc")
+            bm.save(camp, m)
+        elif a.cmd == "map" and a.action == "clear":
+            p = bm.map_path(camp)
+            if p.exists():
+                p.unlink()
+            if not a.no_push:
+                push_map_clear()
+            print("Battle map cleared.")
+            return 0
+        else:
+            m = bm.load(camp)
+        if a.cmd == "place":
+            bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size)
+            bm.save(camp, m)
+            print(f"{a.name} placed at ({a.x},{a.y}).")
+        elif a.cmd == "move":
+            r = bm.move(m, a.name, a.x, a.y, dash=a.dash, force=a.force)
+            bm.save(camp, m)
+            how = "pushed" if a.force else f"{r['cost']} ft, {r['left']} ft left"
+            print(f"{r['name']} {r['from']} → {r['to']} ({how}).")
+        elif a.cmd == "turn":
+            bm.start_turn(m, a.name)
+            if a.round:
+                m["round"] = a.round
+            bm.save(camp, m)
+            print(f"{a.name}'s turn — movement reset.")
+        elif a.cmd == "hp":
+            try:
+                parts = [int(v) for v in a.hp.split("/")]
+            except ValueError:
+                print("combat.py hp: CUR or CUR/MAX, e.g. 4/7", file=sys.stderr)
+                return 2
+            t = bm.set_hp(m, a.name, parts[0], parts[1] if len(parts) > 1 else None)
+            bm.save(camp, m)
+            print(f"{a.name}: {t['hp'][0]}/{t['hp'][1]} HP.")
+        elif a.cmd == "remove":
+            bm.remove(m, a.name)
+            bm.save(camp, m)
+            print(f"{a.name} removed from the map.")
+        elif a.cmd == "dist":
+            n1, t1 = bm.token(m, a.a)
+            n2, t2 = bm.token(m, a.b)
+            print(f"{n1} → {n2}: {bm.distance_ft((t1['x'], t1['y']), (t2['x'], t2['y']))} ft")
+            return 0
+        if a.cmd == "map" and a.action in ("init", "show"):
+            print(bm.render_ascii(m))
+        if not getattr(a, "no_push", True):
+            push_map(m)
+        return 0
+    except bm.MapError as exc:
+        print(f"combat.py {a.cmd}: {exc}", file=sys.stderr)
+        return 2
+
+
+def push_map_clear() -> None:
+    import subprocess
+    push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
+    try:
+        subprocess.run([sys.executable, push, "--json", json.dumps({"map": None})],
+                       capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
+
+    if a.cmd in ("map", "place", "move", "turn", "dist", "remove", "hp"):
+        return _map_cmd(a)
 
     if a.cmd == "init":
         combatants = json.loads(a.combatants)
@@ -417,6 +585,32 @@ def main(argv=None) -> int:
         print_tracker(json.loads(a.state), a.round)
 
     elif a.cmd == "attack":
+        range_note = ""
+        if a.attacker or a.target:
+            if not (a.attacker and a.target):
+                print("combat.py attack: --from and --target go together", file=sys.stderr)
+                return 2
+            import battlemap as bm
+            rng = None
+            if a.rng:
+                try:
+                    parts = [int(v) for v in a.rng.split("/")]
+                    rng = (parts[0], parts[1] if len(parts) > 1 else parts[0])
+                except ValueError:
+                    print("combat.py attack: --range is NORMAL/LONG, e.g. 80/320", file=sys.stderr)
+                    return 2
+            try:
+                chk = bm.attack_range(bm.load(_campaign_dir(a.campaign)), a.attacker, a.target,
+                                      reach=a.reach, rng=rng)
+            except bm.MapError as exc:
+                print(f"combat.py attack: {exc}", file=sys.stderr)
+                return 2
+            if not chk["ok"]:
+                print(f"Out of range: {chk['why']}. No attack rolled.")
+                return 3
+            if chk["disadvantage"]:
+                a.disadvantage = True
+            range_note = f"Range: {chk['distance']} ft" + (f" — disadvantage ({chk['why']})" if chk["why"] else "")
         attack_mods = damage_mods = None
         if a.effects:
             if not a.campaign:
@@ -435,6 +629,8 @@ def main(argv=None) -> int:
                                     target_save=a.target_con_save)
             result["mastery"] = mastery
             result["mastery_text"] = mastery["text"]
+        if range_note:
+            print(range_note)
         print(format_attack(result))
 
     elif a.cmd == "masteries":

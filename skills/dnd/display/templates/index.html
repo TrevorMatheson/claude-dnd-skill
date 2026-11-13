@@ -2347,6 +2347,58 @@
     50%  { filter: blur(1.2px); }
     100% { filter: blur(0.4px); }
   }
+  /* ── Battle map panel (combat.py map / place / move → stats.map) ── */
+  #battle-map {
+    position: fixed; top: 64px; right: 16px; z-index: 40;
+    width: min(46vw, 760px); height: min(62vh, 620px);
+    display: flex; flex-direction: column;
+    background: rgba(14, 10, 6, 0.92); border: 1px solid rgba(201, 168, 76, 0.45);
+    border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); overflow: hidden;
+  }
+  #battle-map[hidden] { display: none; }
+  #battle-map.bm-collapsed { height: auto; }
+  #battle-map.bm-collapsed .bm-stage { display: none; }
+  .bm-head {
+    display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+    font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #c9a84c;
+    border-bottom: 1px solid rgba(201, 168, 76, 0.25); cursor: pointer; user-select: none;
+  }
+  .bm-head .bm-round { margin-left: auto; opacity: .75; }
+  .bm-stage { flex: 1; position: relative; min-height: 0; }
+  .bm-board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .bm-board canvas, .bm-board img.bm-bg { position: absolute; left: 0; top: 0; }
+  .bm-token {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; font-weight: 700; color: #1b130a; overflow: visible;
+    transition: left .7s cubic-bezier(.3,.7,.2,1), top .7s cubic-bezier(.3,.7,.2,1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .6);
+  }
+  .bm-token .bm-face {
+    position: absolute; inset: 3px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #e8d7a8; font-family: inherit;
+  }
+  .bm-token.npc .bm-face { background: #c98a7a; }
+  .bm-token .bm-label {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    font-size: 10px; font-weight: 600; color: #f3e6c4; white-space: nowrap;
+    text-shadow: 0 1px 2px #000; pointer-events: none; margin-top: 1px;
+  }
+  .bm-token .bm-cond {
+    position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px; padding: 0 3px;
+    border-radius: 7px; background: #7a3fb0; color: #fff; font-size: 9px; line-height: 14px; text-align: center;
+  }
+  .bm-token.down .bm-face { filter: grayscale(1) brightness(.6); }
+  .bm-token.mine { outline: 3px solid #ffd76a; outline-offset: 2px; animation: bm-pulse 1.6s ease-in-out infinite; }
+  .bm-token.current { box-shadow: 0 0 0 3px rgba(255, 215, 106, .55), 0 2px 6px rgba(0, 0, 0, .6); }
+  @keyframes bm-pulse { 50% { outline-color: rgba(255, 215, 106, .25); } }
+  /* On a phone the map sits in the page above the input, never over it. */
+  body.input-only #battle-map {
+    position: relative; top: auto; right: auto; width: auto; height: 34vh;
+    margin: 0 0 10px; z-index: 1;
+  }
+  body.input-only #battle-map.bm-collapsed { height: auto; }
+  body.input-only #battle-map .bm-head { padding-right: 60px; }
   #tts-audio-gate {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9999;
     display: flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 999px;
@@ -7443,6 +7495,162 @@ function _renderQueueStatus(chars) {
   _waitingEl.style.display = 'block';
 }
 
+// ── Battle map panel ───────────────────────────────────────────────
+// Drawn from stats.map (combat.py map/place/move push it). Tokens slide to
+// their new square; a phone opened with ?char=<name> highlights its own token.
+const _bmState = { map: null, mine: '', current: '', players: {} };
+(function () {
+  try {
+    const qp = new URLSearchParams(location.search);
+    _bmState.mine = (qp.get('char') || qp.get('character') || '').trim().toLowerCase();
+  } catch (_) {}
+})();
+
+function _bmEnsurePanel() {
+  let panel = document.getElementById('battle-map');
+  if (panel) return panel;
+  panel = document.createElement('div');
+  panel.id = 'battle-map';
+  panel.hidden = true;
+  panel.innerHTML = '<div class="bm-head"><span>Battle map</span><span class="bm-round"></span></div>' +
+                    '<div class="bm-stage"><div class="bm-board"></div></div>';
+  panel.querySelector('.bm-head').addEventListener('click', () => {
+    panel.classList.toggle('bm-collapsed');
+    try { localStorage.setItem('dnd_bm_collapsed', panel.classList.contains('bm-collapsed') ? '1' : '0'); } catch (_) {}
+    if (!panel.classList.contains('bm-collapsed')) _bmRender();
+  });
+  try { if (localStorage.getItem('dnd_bm_collapsed') === '1') panel.classList.add('bm-collapsed'); } catch (_) {}
+  const inputBody = document.body.classList.contains('input-only') && document.getElementById('input-body');
+  if (inputBody) inputBody.insertBefore(panel, inputBody.firstChild);
+  else document.body.appendChild(panel);
+  window.addEventListener('resize', () => { if (_bmState.map) _bmRender(); });
+  return panel;
+}
+
+function _bmHp(t) {
+  const p = _bmState.players[t.name.toLowerCase()];
+  const hp = t.hp || (p && p.hp);
+  if (!hp) return null;
+  const cur = Array.isArray(hp) ? hp[0] : hp.current;
+  const max = Array.isArray(hp) ? hp[1] : hp.max;
+  if (typeof cur !== 'number' || !max) return null;
+  return Math.max(0, Math.min(1, cur / max));
+}
+
+function _bmDrawCells(canvas, m, cs) {
+  const ctx = canvas.getContext('2d');
+  const W = m.grid.w, H = m.grid.h;
+  canvas.width = W * cs; canvas.height = H * cs;
+  const img = !!m.image;
+  for (let y = 0; y < H; y++) {
+    const row = m.cells[y] || '';
+    for (let x = 0; x < W; x++) {
+      const c = row[x] || ' ';
+      let fill = null;
+      if (c === '#') fill = img ? 'rgba(20,14,8,.55)' : '#2a2118';
+      else if (c === ' ') fill = img ? null : '#0c0906';
+      else if (c === 'T') fill = img ? 'rgba(90,60,30,.45)' : '#5a4128';
+      else if (c === '~') fill = img ? 'rgba(60,90,120,.30)' : '#2f3f4a';
+      else if (!img) fill = (c === 'D') ? '#6b4a22' : '#4a3d2c';
+      if (fill) { ctx.fillStyle = fill; ctx.fillRect(x * cs, y * cs, cs, cs); }
+    }
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,.35)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x++) { ctx.beginPath(); ctx.moveTo(x * cs + .5, 0); ctx.lineTo(x * cs + .5, H * cs); ctx.stroke(); }
+  for (let y = 0; y <= H; y++) { ctx.beginPath(); ctx.moveTo(0, y * cs + .5); ctx.lineTo(W * cs, y * cs + .5); ctx.stroke(); }
+}
+
+function _bmRender() {
+  const m = _bmState.map;
+  const panel = _bmEnsurePanel();
+  if (!m) { panel.hidden = true; return; }
+  panel.hidden = false;
+  panel.querySelector('.bm-round').textContent = 'Round ' + (m.round || 1);
+  if (panel.classList.contains('bm-collapsed')) return;
+  const stage = panel.querySelector('.bm-stage');
+  const board = panel.querySelector('.bm-board');
+  const cs = Math.max(8, Math.floor(Math.min(stage.clientWidth / m.grid.w, stage.clientHeight / m.grid.h)));
+  const key = JSON.stringify([m.grid, m.cells, m.image, cs]);
+  if (board.dataset.key !== key) {
+    board.dataset.key = key;
+    board.innerHTML = '';
+    board.style.width = (m.grid.w * cs) + 'px';
+    board.style.height = (m.grid.h * cs) + 'px';
+    if (m.image) {
+      const bg = document.createElement('img');
+      bg.className = 'bm-bg';
+      bg.alt = '';
+      bg.src = '/map-image/' + encodeURI(m.image);
+      bg.style.width = (m.grid.w * cs) + 'px';
+      bg.style.height = (m.grid.h * cs) + 'px';
+      board.appendChild(bg);
+    }
+    const canvas = document.createElement('canvas');
+    _bmDrawCells(canvas, m, cs);
+    board.appendChild(canvas);
+  }
+  const seen = new Set();
+  (m.tokens || []).forEach(tok => {
+    let t = tok;
+    const id = 'bm-tok-' + t.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    seen.add(id);
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'bm-token';
+      el.innerHTML = '<div class="bm-face"></div><div class="bm-label"></div>';
+      board.appendChild(el);
+    } else if (el.parentNode !== board) {
+      board.appendChild(el);
+    }
+    const size = (t.size || 1) * cs;
+    el.classList.toggle('npc', t.kind !== 'pc');
+    el.classList.toggle('mine', !!_bmState.mine && t.name.toLowerCase() === _bmState.mine);
+    el.classList.toggle('current', !!_bmState.current && t.name.toLowerCase() === _bmState.current);
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    el.style.left = (t.x * cs) + 'px';
+    el.style.top = (t.y * cs) + 'px';
+    const frac = _bmHp(t);
+    const ring = frac === null ? '#c9a84c' : (frac > .5 ? '#6fbf73' : frac > .25 ? '#e0b44a' : '#d0574b');
+    const deg = frac === null ? 360 : Math.round(frac * 360);
+    el.style.background = `conic-gradient(${ring} ${deg}deg, rgba(40,30,20,.9) ${deg}deg)`;
+    el.classList.toggle('down', frac === 0);
+    const face = el.querySelector('.bm-face');
+    face.textContent = t.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    face.style.fontSize = Math.max(9, Math.floor(size * 0.36)) + 'px';
+    el.querySelector('.bm-label').textContent = cs >= 26 ? t.name : '';
+    let cond = el.querySelector('.bm-cond');
+    const pl = _bmState.players[t.name.toLowerCase()];
+    if ((!t.conditions || !t.conditions.length) && pl && Array.isArray(pl.conditions)) t = Object.assign({}, t, { conditions: pl.conditions });
+    if (t.conditions && t.conditions.length) {
+      if (!cond) { cond = document.createElement('div'); cond.className = 'bm-cond'; el.appendChild(cond); }
+      cond.textContent = t.conditions.length;
+      el.title = t.name + ' — ' + t.conditions.join(', ');
+    } else {
+      if (cond) cond.remove();
+      el.title = t.name;
+    }
+  });
+  board.querySelectorAll('.bm-token').forEach(el => { if (!seen.has(el.id)) el.remove(); });
+}
+
+function _bmUpdate(stats) {
+  if (!stats) return;
+  if (Array.isArray(stats.players)) {
+    _bmState.players = {};
+    stats.players.forEach(p => { if (p && p.name) _bmState.players[p.name.toLowerCase()] = p; });
+    if (_bmState.map) _bmRender();
+  }
+  if (stats.turn_order !== undefined) {
+    _bmState.current = (stats.turn_order && stats.turn_order.current || '').toLowerCase();
+  }
+  if (stats.map !== undefined) _bmState.map = stats.map;
+  if (stats.map !== undefined || stats.turn_order !== undefined) _bmRender();
+}
+
 // ── Handle staged_inputs SSE event ───────────────────────────────
 function _handleStagedInputs(data) {
   _renderStagedQueue(data);
@@ -7845,6 +8053,7 @@ function connect() {
 
     if (payload.stats) {
       updateStats(payload.stats);
+      try { _bmUpdate(payload.stats); } catch (err) { console.warn('[DnD] battle map', err); }
       if (payload.stats.players && payload.stats.players.length > 0) {
         _sidebarBtn.classList.add('visible');
         _buildCharTabs(payload.stats.players);

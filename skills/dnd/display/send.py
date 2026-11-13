@@ -515,7 +515,8 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #    "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
 #    "turn": "Anony", "round": 2,          # turn pointer (turn_order.current)
 #    "awaiting": ["Anony"],                # whose Send completes the turn ("party" = all)
-#    "moves": [{"name": "Rat", "x": 4, "y": 6}],     # battle-map tokens (see push_stats --map)
+#    "moves": [{"name": "Giant Rat", "x": 4, "y": 6, "hp": "3/7"}],  # battle map (combat.py map):
+#                                          # checked against walls and speed before anything is sent
 #    "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3,
 #                     "label": "Dex save", "dc": 13, "wait": true}}
 #
@@ -600,14 +601,52 @@ def _turn_stats(turn: dict) -> "dict | None":
         stats["turn_order"] = to
     if "awaiting" in turn:
         stats["awaiting"] = turn["awaiting"]
-    if turn.get("moves"):
-        stats["map_moves"] = turn["moves"]
     return stats or None
+
+
+def _apply_turn_moves(turn: dict) -> "dict | None":
+    """Apply a turn's token moves to the campaign's battle map (validated by
+    battlemap.py: walls, speed, occupied squares) and return the display map
+    payload. Raises ValueError naming the move that failed; nothing is saved
+    then. Each move: {"name", "x", "y", "dash"?, "force"?, "turn"?: true}."""
+    moves = turn.get("moves")
+    if not moves:
+        return None
+    _scripts = os.path.join(_DISPLAY_DIR, os.pardir, "scripts")
+    if _scripts not in sys.path:
+        sys.path.insert(0, _scripts)
+    import battlemap as bm
+    from paths import find_campaign
+    camp = turn.get("campaign")
+    if not camp:
+        try:
+            camp = open(rt(".campaign"), encoding="utf-8").read().strip()
+        except OSError:
+            camp = ""
+    if not camp:
+        raise ValueError("moves need a campaign: add \"campaign\" to the turn or load one first")
+    cdir = find_campaign(camp)
+    try:
+        m = bm.load(cdir)
+        for mv in moves:
+            if mv.get("turn"):
+                bm.start_turn(m, mv["name"])
+            if "x" in mv and "y" in mv:
+                bm.move(m, mv["name"], int(mv["x"]), int(mv["y"]),
+                        dash=bool(mv.get("dash")), force=bool(mv.get("force")))
+            if "hp" in mv:
+                hp = [int(v) for v in str(mv["hp"]).split("/")]
+                bm.set_hp(m, mv["name"], hp[0], hp[1] if len(hp) > 1 else None)
+    except (bm.MapError, KeyError, TypeError) as exc:
+        raise ValueError(f"move refused: {exc}")
+    bm.save(cdir, m)
+    return bm.display_payload(m)
 
 
 def send_turn(turn: dict, as_json: bool = False) -> int:
     """Send a whole DM turn in order. Returns a process exit code."""
-    unknown = set(turn) - {"blocks", "stats", "turn", "round", "awaiting", "moves", "dice_request"}
+    unknown = set(turn) - {"blocks", "stats", "turn", "round", "awaiting", "moves", "dice_request",
+                           "campaign"}
     if unknown:
         print(f"send.py: --turn has unknown keys: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2
@@ -621,11 +660,19 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
         if issues:
             print(f"send.py: --turn block invalid: {'; '.join(issues)}", file=sys.stderr)
             return 2
+    try:
+        map_payload = _apply_turn_moves(turn)
+    except ValueError as exc:
+        print(f"send.py: --turn: {exc} — nothing was sent", file=sys.stderr)
+        return 2
 
     token = _read_token()
     for p in payloads:
         _post(FLASK_URL, json.dumps(p).encode("utf-8"), token)
     stats = _turn_stats(turn)
+    if map_payload is not None:
+        stats = dict(stats or {})
+        stats["map"] = map_payload
     if stats:
         _post(STATS_URL, json.dumps(stats).encode("utf-8"), token)
 

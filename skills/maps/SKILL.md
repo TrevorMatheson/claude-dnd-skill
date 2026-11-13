@@ -162,8 +162,16 @@ Companions**.
 
 **Fog of war.** Fog tool → **Cover All** / **Reveal All**, plus a brush, an eraser,
 and a rectangle tool with size options. Typical start: **Cover All**, then reveal the
-area the party can see (rectangle over the room they're in). Reveal more as they
-explore. Ask the DM before **Reveal All** mid-session.
+area the party can see. Reveal more as they explore. Ask the DM before **Reveal All**
+mid-session.
+- *Field note:* dragging out a fog **rectangle** did not register in testing. Use
+  **Cover All / Reveal All**, or reveal with short **brush** strokes (several
+  `left_click_drag`s across the room) instead.
+
+**Tokens — field notes.**
+- 2024 monster rows may be **locked** behind the 2024 Monster Manual. If the `+` does
+  nothing or shows a lock, use the row marked *Legacy* (the 2014 token) and say so.
+- A **Basic** map starts with no prebuilt tokens; everything is added by hand.
 
 **Combat.** Once tokens are on the map, the Combat Encounter panel offers **Add All
 Tokens** (or add tokens individually from the map) to track initiative and rounds in
@@ -180,6 +188,22 @@ the DM asks.
 
 ---
 
+## 6b. Mirroring the TV battle map (optional, once per round)
+
+The live battle map is the TV display's map panel (`combat.py map` / `move`, see the
+`dnd` skill) — it follows every move as the narration lands. D&D Beyond Maps can't
+keep up with that through the browser, so if the table still wants Maps:
+
+1. **Calibrate once per map.** At 100% zoom, find the screen position of the grid
+   square the battle map calls (0,0) and the pixel size of one square (measure two
+   tokens a known number of squares apart). Write both to `vtt.md` on that map's row,
+   e.g. `grid: origin 212,148 · 38 px/square @100%`.
+2. **Never move tokens during narration.** At the end of each round, read the
+   battle map (`combat.py map show`), and turn every token that moved into one
+   `browser_batch` of `left_click_drag`s from its old square to its new one:
+   screen = origin + square × px. Take one screenshot after the batch to confirm.
+3. If the view was panned or zoomed, reset to 100% and re-centre before the batch.
+
 ## 7. `vtt.md` — remembering the table
 
 Keep `<campaign-dir>/vtt.md` so later sessions reuse maps instead of rebuilding:
@@ -190,9 +214,9 @@ Keep `<campaign-dir>/vtt.md` so later sessions reuse maps instead of rebuilding:
 **Account tier:** free (no uploads, Drops locked)   <!-- update if it changes -->
 
 ## Maps
-| Location (state.md) | Map title in Maps | Source map | Notes |
-|---|---|---|---|
-| The Drowned Lantern | The Drowned Lantern — taproom | Wood Floor (Basic) | fog: back room hidden |
+| Location (state.md) | Map title in Maps | Source map | Grid (6b) | Notes |
+|---|---|---|---|---|
+| The Drowned Lantern | The Drowned Lantern — taproom | Wood Floor (Basic) | origin 212,148 · 38 px @100% | fog: back room hidden |
 
 ## PC tokens
 | Campaign PC | D&D Beyond character |

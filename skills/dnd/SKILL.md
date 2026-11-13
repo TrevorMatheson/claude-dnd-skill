@@ -147,9 +147,31 @@ Three optional settings in `state.md → ## Session Flags` let a table tune the 
 
 ---
 
+## Battle map on the TV
+
+When a fight starts and the display is running, put it on the TV's map panel — it follows every move, and phones highlight their own token. Positions live in `<campaign-dir>/battlemap.json`; every command below pushes the map to the display.
+
+```bash
+C="python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py"
+$C map init --layout "$CAMP_DIR/maps/cellar.txt" --place -c $CAMP    # or --size 20x12; --image maps/cellar.png
+$C place "Giant Rat" 11 1 -c $CAMP         # --pc for a PC, --speed 40, --size 2 (Large)
+$C turn Havoc -c $CAMP                     # start of a creature's turn: fresh movement
+$C move Havoc 7 4 -c $CAMP                 # checks walls, obstacles, difficult terrain, hostile squares and speed; --dash, --force (shove / Push)
+$C hp "Giant Rat" 3/7 -c $CAMP             # monster HP ring (PCs use the party sidebar's HP)
+$C attack --atk 5 --ac 12 --dmg 1d6+3 --from Anony --target "Giant Rat" --range 80/320 -c $CAMP
+$C map show -c $CAMP                       # text view of the map and everyone's movement used
+$C map clear -c $CAMP                      # fight over: take the map off the TV
+```
+
+A layout is a text drawing, one character per 5-ft square: `#` wall, `.` floor, `~` difficult terrain, `T` obstacle, `D` door, space = outside. Letters mark starting squares, bound by legend lines — **UPPERCASE = PC**, lowercase = monster: `H = Havoc`, `r = Giant Rat`. A background image goes in `<campaign-dir>/maps/`; draw the layout to match its grid.
+
+`attack --from/--target` measures the distance: out of reach or beyond long range rolls nothing (exit 3); beyond normal range, or a ranged attack with a hostile within 5 ft, rolls with disadvantage. In a `send.py --turn`, put the turn's moves in `"moves": [{"name": "Giant Rat", "x": 8, "y": 1, "turn": true, "hp": "3/7"}]` — they're checked the same way before anything is sent, and the tokens slide as the narration arrives. A refused move is an error, not a silent skip: re-plan it.
+
+---
+
 ## D&D Beyond Maps (VTT)
 
-If the table plays on D&D Beyond Maps, the sibling `maps` skill (`/dm:maps`) puts scenes on the VTT by driving the Maps page in the browser. When the party reaches a new location or a fight starts and `<campaign-dir>/vtt.md` exists (meaning this campaign uses Maps), offer once in a short line to update the map; on a yes, invoke `/dm:maps`. Never block narration on it.
+If the table plays on D&D Beyond Maps, the sibling `maps` skill (`/dm:maps`) puts scenes on the VTT by driving the Maps page in the browser. It sets the scene; the TV battle map above follows the fight. Mirror moves to Maps only once per round, as one batch (maps skill §6b), never token by token during narration. When the party reaches a new location or a fight starts and `<campaign-dir>/vtt.md` exists (meaning this campaign uses Maps), offer once in a short line to update the map; on a yes, invoke `/dm:maps`. Never block narration on it.
 
 ---
 

@@ -1717,6 +1717,20 @@ def stats():
                 validated_factions.append(f)
             _current_stats["factions"] = validated_factions
 
+        # Battle map: "map" replaces it (None clears); "map_moves" moves tokens
+        # in the stored map — [{"name": "Havoc", "x": 4, "y": 2}, ...].
+        if "map" in data:
+            _current_stats["map"] = _clean_map(data["map"])
+        if data.get("map_moves") and isinstance(_current_stats.get("map"), dict):
+            toks = {t.get("name", "").lower(): t for t in _current_stats["map"].get("tokens", [])}
+            for mv in data["map_moves"] if isinstance(data["map_moves"], list) else []:
+                t = toks.get(str(mv.get("name", "")).lower()) if isinstance(mv, dict) else None
+                if t is not None:
+                    try:
+                        t["x"], t["y"] = int(mv["x"]), int(mv["y"])
+                    except (KeyError, TypeError, ValueError):
+                        pass
+
         # quests replaces entirely ([] clears)
         if "quests" in data:
             _current_stats["quests"] = data["quests"]
@@ -1931,6 +1945,59 @@ def roll_pref():
 # `tts_voice: <name>`. Read at /index render, written by POST /voice.
 
 _VOICE_PAT = re.compile(r"^\s*tts_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
+
+
+def _clean_map(m):
+    """Validate a battle-map payload; None clears the map."""
+    if not isinstance(m, dict):
+        return None
+    g = m.get("grid") or {}
+    try:
+        w, h = int(g.get("w", 0)), int(g.get("h", 0))
+    except (TypeError, ValueError):
+        return None
+    if not (1 <= w <= 80 and 1 <= h <= 80):
+        return None
+    cells = [str(r)[:w] for r in (m.get("cells") or [])][:h]
+    tokens = []
+    for t in (m.get("tokens") or [])[:60]:
+        if not isinstance(t, dict) or not t.get("name"):
+            continue
+        try:
+            tok = {"name": str(t["name"])[:40], "x": int(t["x"]), "y": int(t["y"]),
+                   "kind": "pc" if t.get("kind") == "pc" else "npc",
+                   "size": max(1, min(4, int(t.get("size", 1))))}
+        except (KeyError, TypeError, ValueError):
+            continue
+        if isinstance(t.get("hp"), (list, dict)):
+            tok["hp"] = t["hp"]
+        if isinstance(t.get("conditions"), list):
+            tok["conditions"] = [str(c)[:24] for c in t["conditions"][:6]]
+        tokens.append(tok)
+    image = m.get("image")
+    image = str(image) if isinstance(image, str) and re.fullmatch(r"[\w\-./ ]{1,120}", image) else None
+    return {"grid": {"w": w, "h": h, "ft": 5}, "cells": cells, "image": image,
+            "round": int(m.get("round") or 1), "tokens": tokens}
+
+
+@app.route("/map-image/<path:name>")
+def map_image(name):
+    """A battle-map background from the active campaign's maps/ folder."""
+    camp = _active_campaign_name()
+    if not camp or not re.fullmatch(r"[\w\-./ ]{1,120}", name) or ".." in name:
+        return "Not found", 404
+    if not name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        return "Not found", 404
+    try:
+        base = (_find_campaign(camp) / "maps").resolve()
+        rel = name[5:] if name.startswith("maps/") else name
+        path = (base / rel).resolve()
+        path.relative_to(base)
+    except (OSError, ValueError, TypeError):
+        return "Not found", 404
+    if not path.is_file():
+        return "Not found", 404
+    return send_from_directory(str(path.parent), path.name)
 
 
 def _active_campaign_name() -> Optional[str]:
