@@ -34,6 +34,9 @@ _SLICE = re.compile(r"(// Auto-narrate queue\..*?)\nfunction _ttsExtractText", r
 _HARNESS = """
 const log = [];
 let playing = 0, maxPlaying = 0;
+// Prefetch lives beside the queue; with the server marked unusable it is a no-op.
+const _ttsPrefetch = new WeakMap();
+const _ttsServerUsable = () => false;
 function makeBtn(name, ms, fail) {
   const cls = new Set();
   return { name, ms, fail,

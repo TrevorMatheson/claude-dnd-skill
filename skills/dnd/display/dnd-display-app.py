@@ -1450,6 +1450,13 @@ def chunk():
 
     payload: dict = {"text": cleaned}
 
+    # Voice for read-aloud: an explicit "voice" on the block wins; an NPC
+    # otherwise uses the **Voice:** line of its npcs.md entry, a tutor hint
+    # the campaign's tutor_voice. Narration keeps the narrator voice (unset).
+    voice = _block_voice(data, is_npc, is_tutor)
+    if voice:
+        payload["voice"] = voice
+
     if is_action:
         payload["action"] = data["action"]
     elif is_player:
@@ -1473,6 +1480,8 @@ def chunk():
 
     # Store full typed payload so replay preserves action/player/npc/dice/tutor context
     log_entry: dict = {"text": cleaned}
+    if payload.get("voice"):
+        log_entry["voice"] = payload["voice"]
     if is_action:
         log_entry["action"] = data["action"]
     elif is_player:
@@ -1929,6 +1938,81 @@ def _active_campaign_name() -> Optional[str]:
         return open(CAMP_FILE, encoding="utf-8").read().strip() or None
     except OSError:
         return None
+
+
+_NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z]+)", re.IGNORECASE | re.MULTILINE)
+_TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
+_npc_voice_cache: dict = {}   # (campaign, mtime) -> {npc name lower: voice}
+
+
+def _npc_voices(campaign: str) -> dict:
+    """{npc name (lower case): voice} from the campaign's npcs.md.
+
+    An NPC's section is a `### Name` heading; its voice is a line such as
+    `- **Voice:** Kore` inside that section. Cached on the file's mtime."""
+    try:
+        path = _find_campaign(campaign) / "npcs.md"
+        mtime = path.stat().st_mtime
+    except (OSError, ValueError, TypeError):
+        return {}
+    key = (campaign, mtime)
+    if key in _npc_voice_cache:
+        return _npc_voice_cache[key]
+    voices: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    for sec in re.split(r"^###\s+", text, flags=re.MULTILINE)[1:]:
+        name, _, body = sec.partition("\n")
+        m = _NPC_VOICE_PAT.search(body)
+        if m and _tts is not None and m.group(1) in _tts.VALID_VOICES:
+            voices[name.strip().lower()] = m.group(1)
+    _npc_voice_cache.clear()
+    _npc_voice_cache[key] = voices
+    return voices
+
+
+def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
+    """The read-aloud voice for one block, or "" for the narrator voice."""
+    if _tts is None:
+        return ""
+    v = str(data.get("voice") or "").strip()
+    if v in _tts.VALID_VOICES:
+        return v
+    name = _active_campaign_name()
+    if not name:
+        return ""
+    if is_npc:
+        return _npc_voices(name).get(str(data.get("npc", "")).strip().lower(), "")
+    if is_tutor:
+        try:
+            st = (_find_campaign(name) / "state.md").read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, TypeError):
+            return ""
+        m = _TUTOR_VOICE_PAT.search(st)
+        return m.group(1) if m and m.group(1) in _tts.VALID_VOICES else ""
+    return ""
+
+
+def _tts_key_watch(interval: float = 30.0) -> None:
+    """Announce a voice key that appears (or goes) while the server runs.
+
+    tts.py reads the key on every request, so the server never needed a
+    restart for a new key — but the page stopped asking after a 503. A
+    `tts_available` broadcast tells open pages to try the server voice again.
+    """
+    import time as _t
+    last = None
+    while True:
+        try:
+            now = _tts is not None and _tts.key_source() != "unset"
+        except Exception:
+            now = False
+        if last is not None and now != last:
+            _broadcast({"tts_available": now})
+        last = now
+        _t.sleep(interval)
 
 
 def _read_narrator_voice() -> str:
@@ -2841,6 +2925,8 @@ if __name__ == "__main__":
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)
+    if _tts is not None:
+        threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
 
     host = "0.0.0.0" if _LAN_MODE else "localhost"
     # TLS — only enabled when --tls is explicitly passed; HTTP is the default.

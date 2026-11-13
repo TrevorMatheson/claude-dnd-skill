@@ -149,8 +149,12 @@ class WiringTests(unittest.TestCase):
         self.assertIn("speechSynthesis.cancel()", stop.group(1))
 
     def test_only_503_disables_the_server_permanently(self):
-        """A transient failure must not downgrade a working install."""
-        self.assertIn("if (err.message === 'TTS 503') _ttsServerOk = false;", self.full)
+        """A transient failure must not downgrade a working install, and a 503
+        pauses the server voice for a minute rather than until reload, so a key
+        added mid-session is picked up without a refresh."""
+        self.assertIn("if (err.message === 'TTS 503') { _ttsServerOk = false; _ttsRetryAt = Date.now() + 60000; }",
+                      self.full)
+        self.assertIn("if (payload.tts_available) { _ttsServerOk = true; _ttsRetryAt = 0; }", self.full)
         bare = re.findall(r"^\s*_ttsServerOk = false;", self.full, re.M)
         self.assertEqual(bare, [],
                          "an unconditional `_ttsServerOk = false` means any single "

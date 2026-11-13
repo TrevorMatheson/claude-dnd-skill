@@ -2347,6 +2347,14 @@
     50%  { filter: blur(1.2px); }
     100% { filter: blur(0.4px); }
   }
+  #tts-audio-gate {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9999;
+    display: flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 999px;
+    font-size: 18px; cursor: pointer; color: #f3e6c4;
+    border: 1px solid rgba(201, 168, 76, 0.7); background: rgba(30, 22, 10, 0.92);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  }
+  #tts-audio-gate svg { width: 22px; height: 22px; }
   #dp-phys-row { gap: 8px; }
   #dp-phys {
     flex: 1; min-width: 0; font-size: 18px; padding: 10px 12px; border-radius: 10px;
@@ -3665,6 +3673,10 @@
   <div class="audio-row" id="narrate-row" title="Auto-narrate new blocks in this browser only" hidden>
     <span class="audio-label">Auto Narrate</span>
     <span id="narrate-label" class="narrate-label">Off</span>
+  </div>
+  <div class="audio-row" id="readall-row" title="Also read dice lines and DM hints aloud (this browser only)" hidden>
+    <span class="audio-label">Read dice &amp; hints</span>
+    <span id="readall-label" class="narrate-label">Off</span>
   </div>
   <div class="audio-row" id="theme-row" title="Display theme — Dark / Light / Auto (system)">
     <span class="audio-label">Theme</span>
@@ -5028,11 +5040,11 @@ function _renderActionBlockNow(name, text, isReplay) {
 }
 
 // ── NPC dialogue block ───────────────────────────────────────────────
-function renderNPCBlock(name, text, isReplay) {
-  _deferBlock(() => _renderNPCBlockNow(name, text, isReplay), isReplay);
+function renderNPCBlock(name, text, isReplay, voice) {
+  _deferBlock(() => _renderNPCBlockNow(name, text, isReplay, voice), isReplay);
 }
 
-function _renderNPCBlockNow(name, text, isReplay) {
+function _renderNPCBlockNow(name, text, isReplay, voice) {
   _flushForBlock();
 
   const block = document.createElement('div');
@@ -5058,7 +5070,8 @@ function _renderNPCBlockNow(name, text, isReplay) {
     block.appendChild(p);
   });
 
-  _addTtsBar(block);
+  if (voice) block.dataset.voice = voice;
+  _addTtsBar(block, { replay: !!isReplay });
   textContent.appendChild(block);
   _reanchorCursor();
 }
@@ -5135,16 +5148,17 @@ function _renderDiceBlockNow(text, isReplay) {
     else if (hasFumble) triggerFlash('fumble');
   }
 
+  if (_ttsReadAll) _addTtsBar(block, { replay: !!isReplay });
   textContent.appendChild(block);
   _reanchorCursor();
 }
 
 // ── Tutor / learning hint block ──────────────────────────────────────
-function renderTutorBlock(text, isReplay) {
-  _deferBlock(() => _renderTutorBlockNow(text, isReplay), isReplay);
+function renderTutorBlock(text, isReplay, voice) {
+  _deferBlock(() => _renderTutorBlockNow(text, isReplay, voice), isReplay);
 }
 
-function _renderTutorBlockNow(text, isReplay) {
+function _renderTutorBlockNow(text, isReplay, voice) {
   _flushForBlock();
 
   // Detect warning prefix (lines starting with ⚠ or WARNING:)
@@ -5181,6 +5195,8 @@ function _renderTutorBlockNow(text, isReplay) {
 
   header.addEventListener('click', () => block.classList.toggle('expanded'));
 
+  if (voice) block.dataset.voice = voice;
+  if (_ttsReadAll) _addTtsBar(block, { replay: !!isReplay });
   textContent.appendChild(block);
   _reanchorCursor();
 
@@ -5298,7 +5314,7 @@ function renderReplayBatch(items) {
     } else if (item.player) {
       renderPlayerBlock(item.player, item.text, true);
     } else if (item.npc) {
-      renderNPCBlock(item.npc, item.text, true);
+      renderNPCBlock(item.npc, item.text, true, item.voice);
     } else if (item.dice) {
       renderDiceBlock(item.text, true);
     } else if (item.tutor) {
@@ -5312,7 +5328,7 @@ function renderReplayBatch(items) {
         _appendInlineSegments(p, _mdParse(line));
         block.appendChild(p);
       });
-      _addTtsBar(block);
+      _addTtsBar(block, { replay: true });
       textContent.appendChild(block);
     }
   });
@@ -5425,7 +5441,7 @@ function renderReplay(text) {
     _appendInlineSegments(p, _mdParse(line));
     block.appendChild(p);
   });
-  _addTtsBar(block);
+  _addTtsBar(block, { replay: true });
   textContent.appendChild(block);
 
   // Add a divider after replay so live text starts fresh
@@ -6531,6 +6547,15 @@ let _ttsVoice = (_narratorVoiceMeta && _narratorVoiceMeta.getAttribute('content'
 // per browser and per origin (localhost vs the LAN IP are separate) meant the
 // TV silently narrated nothing until someone found the setting.
 let _ttsAutoNarrate = localStorage.getItem('dnd_tts_auto') !== '0';
+// Also read dice lines and tutor hints aloud (off by default: they are short
+// and frequent, and a table may prefer to hear only the story).
+let _ttsReadAll = (() => { try { return localStorage.getItem('dnd_tts_read_all') === '1'; } catch (_) { return false; } })();
+// Clip fetched ahead of time for the next queued block: blockEl -> Promise<ArrayBuffer>
+const _ttsPrefetch = new WeakMap();
+// After a 503 (no key) the page used to stop asking the server until reload, so
+// a key added mid-session needed a refresh. Now it asks again after a minute,
+// or at once when the server announces tts_available.
+let _ttsRetryAt = 0;
 
 let _ttsCtx = null;
 let _ttsActiveSource = null;
@@ -6541,6 +6566,10 @@ let _ttsActivePlayBtn = null;
 // keyless install got a play button that flashed "TTS 503" for three seconds
 // and never spoke -- the server path was the only path.
 let _ttsServerOk = true;
+function _ttsServerUsable() {
+  if (!_ttsServerOk && Date.now() >= _ttsRetryAt) _ttsServerOk = true;
+  return _ttsServerOk;
+}
 let _ttsUtterance = null;
 const _TTS_HAS_BROWSER = 'speechSynthesis' in window;
 if (_TTS_HAS_BROWSER) {
@@ -6725,7 +6754,10 @@ async function _ttsAutoNext() {
   if (!next) { _ttsAutoBusy = false; return; }
   _ttsAutoBusy = true;
   const [btn, blockEl] = next;
-  try { await _ttsPlayBlock(btn, blockEl); } catch (_) {}
+  const playP = _ttsPlayBlock(btn, blockEl);
+  // Fetch the next block's audio now, so it is ready when this one ends.
+  if (_ttsAutoQueue.length) _ttsPrefetchBlock(_ttsAutoQueue[0][1]);
+  try { await playP; } catch (_) {}
   // _ttsPlayBlock returns once playback has started; move on when this block's
   // button leaves the playing/loading state (finished, stopped by hand, failed).
   const waitDone = () => {
@@ -6733,6 +6765,30 @@ async function _ttsAutoNext() {
     _ttsAutoNext();
   };
   setTimeout(waitDone, 250);
+}
+
+function _ttsBlockVoice(blockEl) {
+  return (blockEl && blockEl.dataset && blockEl.dataset.voice) || _ttsVoice;
+}
+
+function _ttsFetchPcm(text, voice) {
+  return fetch('/tts', {
+    method: 'POST',
+    headers: _authHeaders(),
+    body: JSON.stringify({ text, voice }),
+  }).then(resp => {
+    if (!resp.ok) throw new Error('TTS ' + resp.status);
+    return resp.arrayBuffer();
+  });
+}
+
+function _ttsPrefetchBlock(blockEl) {
+  if (!blockEl || _ttsPrefetch.has(blockEl) || !_ttsServerUsable()) return;
+  const text = _ttsExtractText(blockEl);
+  if (!text) return;
+  const p = _ttsFetchPcm(text, _ttsBlockVoice(blockEl));
+  p.catch(() => {});            // a failure is handled when the block plays
+  _ttsPrefetch.set(blockEl, p);
 }
 
 function _ttsExtractText(blockEl) {
@@ -6748,7 +6804,7 @@ async function _ttsPlayBlock(btn, blockEl) {
   const text = _ttsExtractText(blockEl);
   if (!text) return;
 
-  if (!_ttsServerOk && _TTS_HAS_BROWSER) { _ttsBrowserSpeak(btn, text); return; }
+  if (!_ttsServerUsable() && _TTS_HAS_BROWSER) { _ttsBrowserSpeak(btn, text); return; }
 
   const ctx = _getTtsCtx();
   const resumeP = ctx.state !== 'running' ? ctx.resume() : Promise.resolve();
@@ -6759,13 +6815,9 @@ async function _ttsPlayBlock(btn, blockEl) {
   _ttsActivePlayBtn = btn;
 
   try {
-    const resp = await fetch('/tts', {
-      method: 'POST',
-      headers: _authHeaders(),
-      body: JSON.stringify({ text, voice: _ttsVoice }),
-    });
-    if (!resp.ok) throw new Error('TTS ' + resp.status);
-    const pcm = await resp.arrayBuffer();
+    const pre = _ttsPrefetch.get(blockEl);
+    _ttsPrefetch.delete(blockEl);
+    const pcm = await (pre || _ttsFetchPcm(text, _ttsBlockVoice(blockEl)));
     if (!pcm.byteLength) throw new Error('TTS empty');
 
     await resumeP;
@@ -6803,7 +6855,7 @@ async function _ttsPlayBlock(btn, blockEl) {
       // 503 means no key is configured, so stop asking the server at all.
       // Anything else (429, 502, a dropped connection) is transient: fall
       // back for this block and try the server again on the next one.
-      if (err.message === 'TTS 503') _ttsServerOk = false;
+      if (err.message === 'TTS 503') { _ttsServerOk = false; _ttsRetryAt = Date.now() + 60000; }
       _ttsBrowserSpeak(btn, text);
       return;
     }
@@ -6867,8 +6919,9 @@ function _ttsBuildVoiceMenu() {
   return menu;
 }
 
-function _addTtsBar(blockEl) {
+function _addTtsBar(blockEl, opts) {
   if (!_TTS_AVAILABLE || !blockEl) return;
+  const isReplay = !!(opts && opts.replay);
   if (blockEl.querySelector(':scope > .tts-bar')) return;  // already added
 
   const bar = document.createElement('div');
@@ -6899,15 +6952,60 @@ function _addTtsBar(blockEl) {
 
   blockEl.appendChild(bar);
 
-  if (_ttsAutoNarrate) {
+  // History replayed on page load or reconnect is never read aloud by itself.
+  if (_ttsAutoNarrate && !isReplay) {
     // Defer one tick so the bar is in the DOM before triggering the click path
     setTimeout(() => _ttsAutoEnqueue(playBtn, blockEl), 0);
+    _ttsShowAudioGate();
   }
 }
 
 document.addEventListener('click', () => {
   document.querySelectorAll('.tts-voice-menu').forEach(m => { m.hidden = true; });
 }, { passive: true });
+
+// Browsers keep audio locked until someone touches the page. When narration
+// is about to play and the audio context is still locked, show one large
+// "Tap for audio" button; a tap unlocks both Web Audio and speech synthesis.
+function _ttsShowAudioGate() {
+  if (document.getElementById('tts-audio-gate')) return;
+  const ctx = _getTtsCtx();
+  if (ctx.state === 'running') return;
+  const b = document.createElement('button');
+  b.id = 'tts-audio-gate';
+  b.type = 'button';
+  b.innerHTML = _SVG_SPEAKER + '<span>Tap for audio</span>';
+  b.setAttribute('aria-label', 'Turn on narration audio');
+  b.addEventListener('click', ev => {
+    ev.stopPropagation();
+    ctx.resume().catch(() => {});
+    if (_TTS_HAS_BROWSER) {
+      try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (_) {}
+    }
+    b.remove();
+  });
+  document.body.appendChild(b);
+  ctx.resume().then(() => { if (ctx.state === 'running') b.remove(); }).catch(() => {});
+}
+
+// Read-everything row — dice lines and tutor hints get a play bar too.
+if (_TTS_AVAILABLE) {
+  const raRow = document.getElementById('readall-row');
+  const raLabel = document.getElementById('readall-label');
+  if (raRow && raLabel) {
+    raRow.hidden = false;
+    const refreshRa = () => {
+      raLabel.textContent = _ttsReadAll ? 'On' : 'Off';
+      raLabel.classList.toggle('on', _ttsReadAll);
+    };
+    refreshRa();
+    raRow.addEventListener('click', () => {
+      _ttsReadAll = !_ttsReadAll;
+      try { localStorage.setItem('dnd_tts_read_all', _ttsReadAll ? '1' : '0'); } catch (_) {}
+      refreshRa();
+    });
+  }
+}
 
 // Auto-narrate row — only shown if the server reports TTS available.
 if (_TTS_AVAILABLE) {
@@ -7778,6 +7876,7 @@ function connect() {
         }, 8000);
       }
     }
+    if (payload.tts_available) { _ttsServerOk = true; _ttsRetryAt = 0; }
     if (payload.awaiting !== undefined) {
       _awaitingNames = payload.awaiting;
       _renderStagedQueue(_stagedData);
@@ -7856,11 +7955,11 @@ function connect() {
       } else if (payload.player) {
         renderPlayerBlock(payload.player, payload.text);
       } else if (payload.npc) {
-        renderNPCBlock(payload.npc, payload.text);
+        renderNPCBlock(payload.npc, payload.text, false, payload.voice);
       } else if (payload.dice) {
-        renderDiceBlock(payload.text);
+        renderDiceBlock(payload.text, false);
       } else if (payload.tutor) {
-        renderTutorBlock(payload.text);
+        renderTutorBlock(payload.text, false, payload.voice);
       } else {
         handleIncomingText(payload.text);
       }
