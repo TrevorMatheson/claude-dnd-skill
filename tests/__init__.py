@@ -29,6 +29,9 @@ if not os.environ.get("DND_TEST_SANDBOX"):
     os.environ["DND_CAMPAIGN_ROOT"] = str(_sandbox / "dnd")
     os.environ["DND_RUNTIME_DIR"] = str(_sandbox / "dnd" / ".runtime")
     os.environ["DND_TTS_CACHE_DIR"] = str(_sandbox / "tts-cache")
+    # Nothing listens on the discard port: a script that would post to the
+    # live TV on :5001 gets "connection refused" instead.
+    os.environ["DND_DISPLAY_URL"] = "http://127.0.0.1:9"
     os.environ["HOME"] = str(_home)
     os.environ["USERPROFILE"] = str(_home)
     atexit.register(shutil.rmtree, str(_sandbox), ignore_errors=True)

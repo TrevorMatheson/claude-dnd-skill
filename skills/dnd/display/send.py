@@ -76,7 +76,8 @@ if _DISPLAY_DIR not in sys.path:
 from runtime_paths import rt          # writable runtime dir (update-safe)
 _SCHEME_FILE = os.path.join(_DISPLAY_DIR, ".scheme")   # launch marker → code dir
 _SCHEME = open(_SCHEME_FILE, encoding="utf-8").read().strip() if os.path.exists(_SCHEME_FILE) else "http"
-BASE_URL    = f"{_SCHEME}://localhost:5001"
+BASE_URL    = (os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/")
+               or f"{_SCHEME}://localhost:5001")
 FLASK_URL   = f"{BASE_URL}/chunk"
 STATS_URL   = f"{BASE_URL}/stats"
 HEALTH_URL  = f"{BASE_URL}/health"
@@ -372,6 +373,64 @@ def _build_stats_payload(args) -> "dict | None":
     return {"players": list(players.values())}
 
 
+def _stdin_has_data(timeout: float = 0.3) -> bool:
+    """True if reading stdin will not block: a file, a device such as
+    /dev/null, or a pipe with data or EOF within `timeout`."""
+    import stat as _stat
+    try:
+        fd = sys.stdin.fileno()
+        mode = os.fstat(fd).st_mode
+    except (OSError, ValueError, AttributeError):
+        return False
+    if _stat.S_ISREG(mode) or _stat.S_ISCHR(mode):
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+            handle = msvcrt.get_osfhandle(fd)
+            avail = wintypes.DWORD(0)
+            end = time.time() + timeout
+            while True:
+                ok = ctypes.windll.kernel32.PeekNamedPipe(
+                    wintypes.HANDLE(handle), None, 0, None, ctypes.byref(avail), None)
+                if not ok:
+                    return True      # broken pipe = EOF: read returns at once
+                if avail.value:
+                    return True
+                if time.time() >= end:
+                    return False
+                time.sleep(0.02)
+        except Exception:
+            return False
+    import select
+    try:
+        r, _, _ = select.select([sys.stdin], [], [], timeout)
+        return bool(r)
+    except (OSError, ValueError):
+        return False
+
+
+def _print_dice_results(request_id: str, st: dict, as_json: bool) -> None:
+    """Print each roll a dice request received: one line per character, or JSON."""
+    results = st.get("results") or []
+    if as_json:
+        print(json.dumps({"request_id": request_id, "label": st.get("label", ""),
+                          "dc": st.get("dc"), "results": results}), flush=True)
+        return
+    dc = st.get("dc")
+    for r in results:
+        bits = [f"{r.get('character')}: {r.get('total')}"]
+        if r.get("natural") is not None:
+            bits.append(f"(natural {r['natural']}, {r.get('modifier', 0):+d})")
+        if r.get("physical"):
+            bits.append("[physical die]")
+        if r.get("success") is not None:
+            bits.append(f"vs DC {dc} — {'PASS' if r['success'] else 'FAIL'}")
+        print(" ".join(bits), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Send text to the DnD display server.")
     parser.add_argument(
@@ -436,8 +495,10 @@ def main() -> None:
     parser.add_argument("--wait", action="store_true",
         help='With --dice-request: block until every prescribed character has rolled '
              '(polls /dice-request/<id>). Exits non-zero on timeout.')
-    parser.add_argument("--wait-timeout", type=int, default=120, metavar="SECONDS",
-        help='Timeout for --wait (default 120s). On timeout, prints still-pending '
+    parser.add_argument("--json", action="store_true",
+        help="With --wait: print the results as one JSON object on stdout.")
+    parser.add_argument("--wait-timeout", type=int, default=600, metavar="SECONDS",
+        help='Timeout for --wait (default 600s — a real table is slow). On timeout, prints still-pending '
              'characters to stderr and exits 2.')
 
     # ── Stat-change flags (Option B — bundled with narration) ─────────────────
@@ -465,6 +526,11 @@ def main() -> None:
         help="End a timed effect: NAME:SPELL (narrative end — broken, dispelled, player drops)")
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
+    parser.add_argument("--text", metavar="TEXT",
+        help="Body text given inline instead of on stdin (stdin is then not read).")
+    parser.add_argument("--no-body", action="store_true",
+        help="Never read stdin. For award / stat-only sends from a tool call whose "
+             "stdin is an open pipe that never closes.")
     parser.add_argument("--verify", action="store_true",
         help="After sending, GET /health and confirm the broadcast was received. "
              "Surfaces a clear stderr line on mismatch — use during dev/debug.")
@@ -539,6 +605,7 @@ def main() -> None:
                         continue
                     if st.get("complete"):
                         print(f"send.py: all rolls received.", file=sys.stderr)
+                        _print_dice_results(request_id, st, args.json)
                         break
                     remaining = st.get("pending") or []
                     if remaining != last_pending:
@@ -559,10 +626,25 @@ def main() -> None:
             return
 
     _has_content_flag = bool(args.player or args.npc or args.dice or args.tutor or args.action)
-    if _has_content_flag:
+    # Body-optional actions: with one of these and no content flag, stdin is
+    # read only if something is already there. A tool call's stdin can be a
+    # pipe that is never written or closed, and `--xp-award` used to hang on
+    # it until killed.
+    _body_optional = bool(args.inspiration_award or args.inspiration_spend
+                          or args.milestone_award or args.milestone_spend
+                          or args.xp_award or _build_stats_payload(args))
+    if args.text is not None:
+        text = args.text
+    elif args.no_body:
+        text = ""
+    elif _has_content_flag:
         text = sys.stdin.read()
+    elif sys.stdin is None or sys.stdin.isatty():
+        text = ""
+    elif _body_optional:
+        text = sys.stdin.read() if _stdin_has_data() else ""
     else:
-        text = "" if sys.stdin.isatty() else sys.stdin.read()
+        text = sys.stdin.read()
     token = _read_token()
 
     # ── Inspiration award/spend ──────────────────────────────────────────────

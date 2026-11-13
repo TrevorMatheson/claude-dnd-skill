@@ -1151,6 +1151,18 @@ _input_lock = threading.Lock()
 # send.py --wait polls GET /dice-request/<id> to know when the DM can move on.
 _dice_pending: dict = {}
 _dice_pending_lock = threading.Lock()
+# Finished requests keep their results so `send.py --wait` can print the rolls
+# (it used to report only that they happened). Bounded: oldest dropped first.
+_dice_done: dict = {}
+_DICE_DONE_MAX = 64
+
+
+def _dice_finish(request_id: str, entry: dict) -> None:
+    """Move a drained request to _dice_done. Caller holds _dice_pending_lock."""
+    _dice_pending.pop(request_id, None)
+    _dice_done[request_id] = {"results": entry.get("results", []), "meta": entry["meta"]}
+    while len(_dice_done) > _DICE_DONE_MAX:
+        _dice_done.pop(next(iter(_dice_done)))
 
 
 def _dice_pending_snapshot() -> list:
@@ -2134,6 +2146,12 @@ def player_dice():
     Rolls server-side (secrets.randbelow → uniform, non-spoofable), broadcasts
     a dice-typed entry on the feed, and returns the result so the phone can
     finish its slot-machine animation on the real value.
+
+    `"faces": [14]` (or two faces for a 1d20 with advantage / disadvantage)
+    records a PHYSICAL roll instead: the player rolled a real die and typed
+    the face; the modifier is added here, so nobody has to guess whether "14"
+    was the face or the total. It goes through the same request correlation
+    as a virtual roll, so `send.py --wait` reports both alike.
     """
     if not _token_ok():
         return "Forbidden", 403
@@ -2154,7 +2172,24 @@ def player_dice():
         return jsonify({"error": "out of range"}), 400
     modifier = max(-100, min(100, modifier))
 
+    faces_in = data.get("faces")
+    physical = faces_in is not None
+    if physical:
+        try:
+            faces = [int(f) for f in (faces_in if isinstance(faces_in, list) else [faces_in])]
+        except (TypeError, ValueError):
+            return jsonify({"error": "faces must be integers"}), 400
+        want = 2 if (adv in ("advantage", "disadvantage") and spec == "1d20") else n_dice
+        if len(faces) == 1 and want == 2:
+            want = 1          # one physical d20 typed with advantage on: take it as the kept die
+            adv = "normal"
+        if len(faces) != want or any(not (1 <= f <= n_sides) for f in faces):
+            return jsonify({"error": f"expected {want} face(s) between 1 and {n_sides}"}), 400
+        _faces_iter = iter([[f] for f in faces] if want == 2 else [faces])
+
     def _roll_once() -> list[int]:
+        if physical:
+            return next(_faces_iter)
         return [secrets.randbelow(n_sides) + 1 for _ in range(n_dice)]
 
     if adv in ("advantage", "disadvantage") and spec == "1d20":
@@ -2177,7 +2212,8 @@ def player_dice():
     if modifier:
         breakdown += f" {mod_str}"
     suffix = f" — {label}" if label else ""
-    text   = f"{character} rolls {spec}{mod_str}: {breakdown} = {total}{suffix}"
+    how    = " (rolled at the table)" if physical else ""
+    text   = f"{character} rolls {spec}{mod_str}{how}: {breakdown} = {total}{suffix}"
 
     payload   = {"text": text, "dice": True}
     log_entry = {"text": text, "dice": True}
@@ -2207,9 +2243,17 @@ def player_dice():
                 matched = next((c for c in entry["chars"] if c.lower() == ci), None)
                 if matched is not None:
                     entry["chars"].discard(matched)
+                    dc_v = entry["meta"].get("dc")
+                    entry.setdefault("results", []).append({
+                        "character": matched, "rolls": both or rolls, "kept": kept,
+                        "modifier": modifier, "total": total, "physical": physical,
+                        "natural": kept[0] if spec == "1d20" else None,
+                        "success": (total >= dc_v) if isinstance(dc_v, int) else None,
+                        "text": text,
+                    })
                     pending_changed = True
                     if not entry["chars"]:
-                        _dice_pending.pop(req_id, None)
+                        _dice_finish(req_id, entry)
     if pending_changed:
         _broadcast({"dice_pending": _dice_pending_snapshot()})
 
@@ -2224,6 +2268,7 @@ def player_dice():
         "subtotal": subtotal,
         "total": total,
         "text": text,
+        "physical": physical,
         "request_id": req_id or None,
     }), 200
 
@@ -2278,6 +2323,7 @@ def dice_request():
                 "chars": set(trackable),
                 "meta": {"spec": spec, "modifier": modifier, "advantage": adv, "label": label, "dc": dc_val},
                 "started_at": time.time(),
+                "results": [],
             }
         _broadcast({"dice_pending": _dice_pending_snapshot()})
 
@@ -2317,11 +2363,17 @@ def dice_request_status(request_id):
     with _dice_pending_lock:
         entry = _dice_pending.get(request_id)
         if entry is None or not entry["chars"]:
-            return jsonify({"complete": True, "pending": []}), 200
+            done = _dice_done.get(request_id) or {}
+            meta = done.get("meta") or {}
+            return jsonify({"complete": True, "pending": [],
+                            "results": done.get("results", []),
+                            "label": meta.get("label", ""), "dc": meta.get("dc")}), 200
         return jsonify({
             "complete": False,
             "pending": sorted(entry["chars"]),
+            "results": list(entry.get("results", [])),
             "label": entry["meta"].get("label", ""),
+            "dc": entry["meta"].get("dc"),
             "started_at": entry["started_at"],
         }), 200
 
