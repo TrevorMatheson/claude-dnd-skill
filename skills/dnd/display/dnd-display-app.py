@@ -1917,6 +1917,15 @@ def _write_narrator_voice(voice: str) -> bool:
     except (OSError, ValueError):
         return False
 
+    # _read_text decodes raw bytes, so a CRLF file arrives with its "\r\n"
+    # intact. Editing in "\n" form and writing back with newline="" keeps the
+    # file's own line endings. Before this, write_text's newline translation on
+    # Windows turned every "\r\n" into "\r\r\n" — one more "\r" per line on
+    # every voice change — and the "\n"-only section regex below never matched
+    # a CRLF file, so the chosen voice was never saved either.
+    eol = "\r\n" if "\r\n" in text else "\n"
+    text = text.replace("\r\n", "\n")
+
     new_line = f"tts_voice: {voice}"
     if _VOICE_PAT.search(text):
         text = _VOICE_PAT.sub(new_line, text, count=1)
@@ -1935,8 +1944,11 @@ def _write_narrator_voice(voice: str) -> bool:
             sep = "" if text.endswith("\n") else "\n"
             text = f"{text}{sep}\n## Session Flags\n{new_line}\n"
 
+    if eol != "\n":
+        text = text.replace("\n", eol)
     try:
-        state.write_text(text, encoding="utf-8")
+        with open(state, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
         return True
     except OSError:
         return False
