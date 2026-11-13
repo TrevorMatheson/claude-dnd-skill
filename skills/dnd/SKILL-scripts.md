@@ -111,6 +111,10 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py attack --atk 4 --ac 15 --dmg 2d6+2
 # Target paralyzed or unconscious and within 5 ft: any hit is a critical hit
 python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py attack --atk 4 --ac 15 --dmg 2d6+2 --crit
 
+# Advantage (Pack Tactics, unseen attacker, prone target in 5 ft) / disadvantage: 2d20, keep higher / lower.
+# Unknown options are an error now, so a misspelt flag can't silently change the roll.
+python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py attack --atk 4 --ac 15 --dmg 2d6+2 --advantage
+
 # Add the attacker's tracked modifiers (Bless +1d4 to the attack roll)
 python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py attack --atk 4 --ac 15 --dmg 2d6+2 --effects "Flerb" -c $CAMP
 

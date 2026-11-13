@@ -386,7 +386,13 @@ def _print_physical(res: dict, num_dice: int, die_size: int, modifier: int,
 # --------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    argv = sys.argv[1:]
+    # Same spelling as combat.py attack: --advantage / --disadvantage mean `adv` / `dis`.
+    _ALIASES = {"--advantage": "adv", "--adv": "adv", "--disadvantage": "dis", "--dis": "dis"}
+    argv = [_ALIASES.get(a, a) for a in sys.argv[1:]]
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from cli_strict import reject_unknown
+    reject_unknown(argv, {"--silent", "--auto", "--label", "--player", "--vs", "--dc",
+                          "--effects", "-c", "--campaign"}, "dice.py")
     silent = "--silent" in argv
     auto = "--auto" in argv
     label = ""
