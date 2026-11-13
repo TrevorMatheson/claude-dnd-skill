@@ -48,7 +48,8 @@ def _set_ruleset_paths(ruleset: str) -> None:
     """Repoint DATA_FILE / SUPPLEMENTAL_FILE module globals based on ruleset."""
     global DATA_FILE, SUPPLEMENTAL_FILE
     if ruleset == "2024":
-        DATA_FILE = os.path.join(SKILLS_DIR, "data", "dnd5e_srd_2024.json")
+        from paths import dataset_file
+        DATA_FILE = str(dataset_file("dnd5e_srd_2024.json"))
         SUPPLEMENTAL_FILE = os.path.join(SKILLS_DIR, "data", "dnd5e_supplemental_2024.json")
     else:
         DATA_FILE = os.path.join(SKILLS_DIR, "data", "dnd5e_srd.json")

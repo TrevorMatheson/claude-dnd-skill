@@ -1,6 +1,6 @@
 ---
 name: dnd
-description: "v2.4.0 · Dungeon Master assistant for running persistent D&D 5e campaigns. Handles campaign creation/loading, character management, combat tracking, NPC generation, dice rolling, and session state — all persisted across sessions. Invoke with /dm:dnd followed by a subcommand, or just speak naturally once a campaign is loaded."
+description: "v2.7.0 · Dungeon Master assistant for running persistent D&D 5e campaigns. Handles campaign creation/loading, character management, combat tracking, NPC generation, dice rolling, and session state — all persisted across sessions. Invoke with /dm:dnd followed by a subcommand, or just speak naturally once a campaign is loaded."
 tools: Read, Write, Edit, Glob, Bash, AskUserQuestion
 ---
 
@@ -53,7 +53,7 @@ When the skill is invoked **without a clear action** — a bare `/dm:dnd`, or a 
 > **Question:** "What would you like to do?"
 > **Options:** `Load a campaign` · `Start a new campaign` · `Import a campaign` · `Manage a character`
 
-Then branch to the matching procedure in `SKILL-commands.md` (`/dm:dnd load`, `/dm:dnd new`, `/dm:dnd import`, `/dm:dnd character …`).
+Then branch to the matching procedure in `SKILL-commands.md` (`/dm:dnd load`, `/dm:dnd new`, `/dm:dnd character …`) or, for `/dm:dnd import`, in `SKILL-reference.md`.
 
 **Skip the menu when the intent is already explicit.** If the player typed a subcommand (`/dm:dnd load`, `/dm:dnd new …`) or named a campaign (`/dm:dnd load the-iron-vault`, *"load my pirate campaign"*), go straight to that procedure — do not ask. The menu is for the empty/ambiguous case only; never make a player who already told you what they want pick it from a list.
 
@@ -110,7 +110,7 @@ Your excitement about the world is contagious. A DM who is clearly engaged — w
 ### 9. Read This Specific Player
 The meta-skill beneath all of the above is knowing who is sitting across from you. A DM who is excellent for one player may be wrong for another. Pay attention to what *this* player responds to — their character choices, their questions, the moments they push back — and calibrate everything to them. This skill compounds over sessions.
 
-**Per-campaign calibration lives in `state.md → ## DM Style Notes`.** Read it at every load. It contains distilled, table-specific patterns drawn from calibration feedback across all sessions — what lands for this party, what splits the table, what to lean into, what to avoid. These override default DM instincts. Update it at `/dm:dnd end` when new patterns emerge. This is the mechanism that makes Standard 9 compound across sessions rather than resetting each time.
+**Per-campaign calibration lives in `state.md → ## DM Style Notes`.** Read it at every load. It contains distilled, table-specific patterns drawn from calibration feedback across all sessions — what lands for this party, what splits the table, what to lean into, what to avoid. These override default DM instincts. Its `### Narration` list (length, name who acts next, end on a question to that character, teach first-time players the die and target, NPC lines in their own voiced block) is followed every turn; a campaign made before it existed gets the list added from `templates/state.md` at the next load. Update it at `/dm:dnd end` when new patterns emerge. This is the mechanism that makes Standard 9 compound across sessions rather than resetting each time.
 
 Ask leading questions to build investment. During quiet moments or at the start of a session, ask the player one specific question about their character: a relationship, a past event, an opinion about someone in the current scene — *e.g., "Does [name] have history with anyone in this faction — professionally or otherwise?"* Their answer is a plot hook. Either outcome is useful: it deepens what's already there or opens a new thread. Record answers that matter in the character file.
 
@@ -147,6 +147,34 @@ Three optional settings in `state.md → ## Session Flags` let a table tune the 
 
 ---
 
+## Battle map on the TV
+
+When a fight starts and the display is running, put it on the TV's map panel — it follows every move, and phones highlight their own token. Positions live in `<campaign-dir>/battlemap.json`; every command below pushes the map to the display.
+
+```bash
+C="python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py"
+$C map init --layout "$CAMP_DIR/maps/cellar.txt" --place -c $CAMP    # or --size 20x12; --image maps/cellar.png
+$C place "Giant Rat" 11 1 -c $CAMP         # --pc for a PC, --speed 40, --size 2 (Large)
+$C turn Havoc -c $CAMP                     # start of a creature's turn: fresh movement
+$C move Havoc 7 4 -c $CAMP                 # checks walls, obstacles, difficult terrain, hostile squares and speed; --dash, --force (shove / Push)
+$C hp "Giant Rat" 3/7 -c $CAMP             # monster HP ring (PCs use the party sidebar's HP)
+$C attack --atk 5 --ac 12 --dmg 1d6+3 --from Anony --target "Giant Rat" --range 80/320 -c $CAMP
+$C map show -c $CAMP                       # text view of the map and everyone's movement used
+$C map clear -c $CAMP                      # fight over: take the map off the TV
+```
+
+A layout is a text drawing, one character per 5-ft square: `#` wall, `.` floor, `~` difficult terrain, `T` obstacle, `D` door, space = outside. Letters mark starting squares, bound by legend lines — **UPPERCASE = PC**, lowercase = monster: `H = Havoc`, `r = Giant Rat`. A background image goes in `<campaign-dir>/maps/`; draw the layout to match its grid.
+
+`attack --from/--target` measures the distance: out of reach or beyond long range rolls nothing (exit 3); beyond normal range, or a ranged attack with a hostile within 5 ft, rolls with disadvantage. In a `send.py --turn`, put the turn's moves in `"moves": [{"name": "Giant Rat", "x": 8, "y": 1, "turn": true, "hp": "3/7"}]` — they're checked the same way before anything is sent, and the tokens slide as the narration arrives. A refused move is an error, not a silent skip: re-plan it.
+
+---
+
+## D&D Beyond Maps (VTT)
+
+If the table plays on D&D Beyond Maps, the sibling `maps` skill (`/dm:maps`) puts scenes on the VTT by driving the Maps page in the browser. It sets the scene; the TV battle map above follows the fight. Mirror moves to Maps only once per round, as one batch (maps skill §6b), never token by token during narration. When the party reaches a new location or a fight starts and `<campaign-dir>/vtt.md` exists (meaning this campaign uses Maps), offer once in a short line to update the map; on a yes, invoke `/dm:maps`. Never block narration on it.
+
+---
+
 ## Directory Layout
 
 **Code & assets** live in the skill directory. `${CLAUDE_SKILL_DIR}` is substituted
@@ -158,7 +186,10 @@ skill, or a dev clone).
 ${CLAUDE_SKILL_DIR}/                 ← the skill dir (plugin: <plugin>/skills/dnd/)
   SKILL.md           ← core DM rules (this file)
   SKILL-scripts.md   ← all Python script syntax (load at session start)
-  SKILL-commands.md  ← all /dm:dnd command procedures (load at session start)
+  SKILL-commands.md  ← /dm:dnd command procedures used every session (load at session start)
+  SKILL-reference.md ← rarely used commands and scripts: import, graph, oracle, registry,
+                       rename, path/update/data, recap, display setup, autosave, corpus
+                       (read on demand, never at load)
   scripts/           ← dice.py, combat.py, character.py, tracker.py, calendar.py, lookup.py
   data/              ← bundled 5e SRD dataset (dnd5e_srd.json — no download needed; sync via /dm:dnd data sync)
   templates/         ← blank character-sheet.md, state.md, world.md, npcs.md, session-log.md
@@ -187,9 +218,9 @@ Resolve `~` to the user's home directory. Scripts locate both roots via
 | Tier | Model | When to use |
 |------|-------|-------------|
 | **Script** | Python only | Dice, HP math, XP, level-up, initiative, conditions, date, data lookup, stat display |
-| **Haiku** | `claude-haiku-4-5-20251001` | Formatting only: XP summaries, NPC attitude lines, quest one-liners |
-| **Sonnet** | `claude-sonnet-4-6` (session default) | All DM work: narration, NPC dialogue, skill outcomes, plot decisions, combat |
-| **Opus** | `claude-opus-4-6` | `/dm:dnd new` world generation; `/dm:dnd character new` pillar derivation |
+| **Haiku** | `haiku` (CLI alias — current Haiku) | Formatting only: XP summaries, NPC attitude lines, quest one-liners |
+| **Sonnet** | `sonnet` (or the session default) | All DM work: narration, NPC dialogue, skill outcomes, plot decisions, combat |
+| **Opus** | `opus` | `/dm:dnd new` world generation; `/dm:dnd character new` pillar derivation |
 
 **Script-first rule:** Before reaching for the LLM for any calculation, check whether a script handles it:
 `dice.py` · `combat.py` · `ability-scores.py` · `character.py` · `tracker.py` · `calendar.py` · `lookup.py` · `push_stats.py`
@@ -302,7 +333,7 @@ Roll handling is chosen at game start and stored as `roll_mode` in `state.md →
 - **`roll_mode: players` (default) — players roll their own PCs.** For *any* PC d20 (attack, skill/ability check, save, death save), **call for the roll by name and STOP — wait for the player's result before resolving.** Do **not** roll it for them. ⚠ **Never fall back to `dice.py` or an `[auto]` result for a PC** just because the physical-dice phone server isn't running — if no roll comes back, ask the player for the number out loud. You roll **only** NPC/monster dice. (This is a hard constraint: silently auto-rolling a PC is the #1 thing players notice and dislike.)
   - **Prescribe the roll through the display when it's running** (`_display_running = true`): call
     `python3 ${CLAUDE_SKILL_DIR}/display/send.py --dice-request --character "<PC>" --spec 1dN [--modifier ±M] [--advantage advantage|disadvantage] [--label "<check>"] [--dc N] --wait`.
-    The roll routes to that PC's **phone** if one is bound, or **auto-opens the on-screen Dice drawer** on the shared screen when no phone is bound (or the display's *Roll on screen* setting is on) — the same roller either way. `--wait` blocks until the player rolls and then prints their result for you to resolve (it exits non-zero on timeout — fall back to asking out loud). When the display is **not** running, just call for the roll verbally and wait. Never roll the PC yourself under `players`.
+    The roll routes to that PC's **phone** if one is bound, or **auto-opens the on-screen Dice drawer** on the shared screen when no phone is bound (or the display's *Roll on screen* setting is on) — the same roller either way. `--wait` blocks until the player rolls and then prints one line per roller — `Havoc: 17 (natural 14, +3) vs DC 12 — PASS`, with `[physical die]` when they rolled a real die and typed the face — or one JSON object with `--json`. It waits up to 10 minutes (`--wait-timeout N`) and exits non-zero on timeout — fall back to asking out loud. When the display is **not** running, just call for the roll verbally and wait. Never roll the PC yourself under `players`.
 - **`roll_mode: auto` — you roll everything openly.** Resolve PC d20s yourself via `dice.py` and show full math inline (`Piper — Perception: d20+5 = 18 → …`), no waiting. For solo / fast play.
 
 **Initiative** is always DM-rolled via `combat.py init` for all combatants (PCs and NPCs) regardless of `roll_mode`.
@@ -315,6 +346,23 @@ Roll handling is chosen at game start and stored as `roll_mode` in `state.md →
 ---
 
 **Display sync (when `_display_running = true`):**
+
+**Preferred: one call per turn.** Roll your dice first, then send the whole turn — player echo, dice lines, narration, NPC lines, tutor hint, stat changes, whose turn it is and who must act — in one `send.py --turn` call. Blocks arrive in the order listed; stats, turn pointer and `awaiting` follow the blocks; an optional `dice_request` comes last (with `"wait": true` it prints the roll like `--dice-request --wait`). Write the JSON to a file with the Write tool, or pipe it with `--turn -`:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/display/send.py --turn "$CAMP_DIR/.turn.json"
+```
+```json
+{"blocks": [
+   {"action": "Havoc", "text": "Havoc lunges at the rat."},
+   {"dice": true, "text": "Havoc — Longsword: d20+5 = 21 vs AC 12 → hit, 7 slashing"},
+   {"text": "The blade catches the rat mid-leap..."},
+   {"npc": "Mira", "text": "Two more in the rafters!"},
+   {"tutor": true, "text": "Anony: a Dexterity save is d20 + your DEX save bonus; 13 or more succeeds."}],
+ "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
+ "turn": "Anony", "awaiting": ["Anony"],
+ "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3, "label": "Dex save", "dc": 13, "wait": true}}
+```
+`awaiting` names whose Send ends the turn — that player's single Send goes through without the others pressing skip. Use `"party"` when everyone should answer. Without it, a `turn` pointing at a PC does the same. A bad block (no text, two kinds, unknown key) rejects the whole turn before anything is sent. The single-purpose sends below still work.
 
 *Player actions* — before responding, send a cleaned version to the display:
 ```bash
@@ -535,4 +583,6 @@ The tutor block always goes **last** in the Bash send sequence.
 
 **Scripting and rolls:** Run scripts, rolls, and simple expansions immediately — no confirmation prompts. Only pause for genuinely consequential operations (e.g. deleting campaign data).
 
-**Reference modules:** For full script syntax, Read `${CLAUDE_SKILL_DIR}/SKILL-scripts.md`. For full command procedures, Read `${CLAUDE_SKILL_DIR}/SKILL-commands.md`. Load both at `/dm:dnd load`.
+**Python on Windows:** the examples say `python3`; on Windows use `python` (or `py`) — `python3` there is often the Microsoft Store stub. Every script also works when run with `sys.executable` of an already-working interpreter.
+
+**Reference modules:** For full script syntax, Read `${CLAUDE_SKILL_DIR}/SKILL-scripts.md`. For full command procedures, Read `${CLAUDE_SKILL_DIR}/SKILL-commands.md`. Load both at `/dm:dnd load`. Read `${CLAUDE_SKILL_DIR}/SKILL-reference.md` only when a command or script it covers is used (module import, graph, oracle, name registry, NPC rename, path / update / data, recap snapshots, display setup, autosave, corpus) — leaving it out keeps the session's context free for narration.

@@ -95,6 +95,7 @@ LEVEL_XP: dict[int, int] = {
 DIFF_IDX: dict[str, int] = {"easy": 0, "medium": 1, "hard": 2, "deadly": 3}
 DIFF_LABELS: dict[int, str] = {0: "Easy", 1: "Medium", 2: "Hard", 3: "Deadly"}
 
+from utf8io import write_text as write_keep_eol
 from paths import find_campaign as _find_campaign, campaigns_dir as _campaigns_dir, display_dir as _display_dir
 CAMPAIGNS_DIR = _campaigns_dir()
 DISPLAY_SCRIPT = _display_dir() / "push_stats.py"
@@ -235,7 +236,7 @@ def _write_char_xp(path: pathlib.Path, new_xp: int, current_level: int) -> bool:
         # regex mismatch would silently skip writing; warn explicitly instead of
         # pretending the award succeeded.
         print(f"xp.py: warning — no XP field found in {path.name} ({new_xp} not written)", file=sys.stderr)
-    path.write_text(updated, encoding="utf-8")
+    write_keep_eol(path, updated)
     return leveled
 
 

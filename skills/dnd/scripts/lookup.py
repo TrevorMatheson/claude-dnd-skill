@@ -45,9 +45,13 @@ if _paths is not None:
 else:
     _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "data")
 DATA_FILE_2014    = os.path.join(_DATA_DIR, "dnd5e_srd.json")
-DATA_FILE_2024    = os.path.join(_DATA_DIR, "dnd5e_srd_2024.json")
+# Built datasets (2024) live under the data root so a reinstall keeps them;
+# dataset_file() falls back to the bundled copy.
+DATA_FILE_2024    = (str(_paths.dataset_file("dnd5e_srd_2024.json")) if _paths is not None
+                     else os.path.join(_DATA_DIR, "dnd5e_srd_2024.json"))
 SUPPLEMENTAL_FILE_2014 = os.path.join(_DATA_DIR, "dnd5e_supplemental.json")
-SUPPLEMENTAL_FILE_2024 = os.path.join(_DATA_DIR, "dnd5e_supplemental_2024.json")
+SUPPLEMENTAL_FILE_2024 = (str(_paths.dataset_file("dnd5e_supplemental_2024.json")) if _paths is not None
+                          else os.path.join(_DATA_DIR, "dnd5e_supplemental_2024.json"))
 
 # Backwards-compat alias used by older callers (e.g. app.py)
 DATA_FILE         = DATA_FILE_2014

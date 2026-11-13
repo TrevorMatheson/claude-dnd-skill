@@ -53,6 +53,7 @@ Subcommands:
 import argparse
 import datetime
 import json
+import os
 import pathlib
 import shutil
 import sys
@@ -771,15 +772,23 @@ def cmd_extract(args) -> int:
     prompt = _build_extraction_prompt(sources)
     print(f"# Calling Haiku — input chars: {len(prompt)} from {len(sources)} files", file=sys.stderr)
 
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", "claude-haiku-4-5-20251001",
-            "--system-prompt", _EXTRACTION_SYSTEM,
-            prompt,
-        ],
-        capture_output=True, encoding="utf-8", text=True, timeout=420,
-    )
+    # "haiku" is the CLI's alias for the current Haiku model, so no dated id
+    # goes stale here; DND_GRAPH_MODEL overrides it.
+    model = os.environ.get("DND_GRAPH_MODEL", "").strip() or "haiku"
+    try:
+        result = subprocess.run(
+            [
+                shutil.which("claude") or "claude", "-p",
+                "--model", model,
+                "--system-prompt", _EXTRACTION_SYSTEM,
+                prompt,
+            ],
+            capture_output=True, encoding="utf-8", text=True, timeout=420,
+        )
+    except FileNotFoundError:
+        print("the `claude` command was not found on PATH — install Claude Code and sign in",
+              file=sys.stderr)
+        return 1
     if result.returncode != 0:
         print(f"claude returned {result.returncode}: {result.stderr}", file=sys.stderr)
         return 1

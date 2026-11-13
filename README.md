@@ -63,6 +63,7 @@ If you're on Claude Code, you're in the right place.
 - <img src="skills/dnd/display/icons/helmet.png" height="18"> **Portable characters** — bring your character into any campaign; level up, grow your stat tree, and carry your inventory and loot — or start fresh each time
 - <img src="skills/dnd/display/icons/attack.png" height="18"> **Full D&D 5e mechanics** — initiative, attacks, saving throws, spell slots, XP, levelling up, short/long rests
 - <img src="skills/dnd/display/icons/chat.png" height="18"> **Atmospheric DM** — dark fantasy tone, distinct NPC voices, hidden rolls, a world that reacts to choices
+- <img src="skills/dnd/display/icons/location.png" height="18"> **D&D Beyond Maps (VTT)** — `/dm:maps` drives the official D&D Beyond virtual tabletop in the browser: finds a map that fits the party's current location (your library, free quickplay maps, or a terrain basic map), titles it after the location, places PC and monster tokens, covers it in fog and reveals what the party sees, and displays it to players. Map choices are remembered per campaign in `vtt.md`
 - <img src="skills/dnd/display/icons/crystal_ball.png" height="18"> **Cinematic display companion** — typewriter narration on your TV, scene-reactive backgrounds, dynamic sky canvas, live party sidebar; cast, mirror, or open on any screen on your network
 - <img src="skills/dnd/display/icons/location.png" height="18"> **Dynamic sky canvas** — sun arc, moon, twinkling stars, and cloud density rendered in real time from world time data; transitions with time of day and weather
 - <img src="skills/dnd/display/icons/focus.png" height="18"> **Player input from the companion UI** — players submit actions from phone/tablet with a one-tap send and a live *Your move → Sent → ✓ DM has your move → narrating* status strip; Claude picks them up automatically in autorun mode
@@ -214,6 +215,7 @@ Once loaded, type naturally — no `/dm:dnd` prefix needed. The DM interprets ev
 | `/dm:dnd graph add-edge --from <id> --to <id> --type T --since N` | Record a relationship shift mid-session |
 | `/dm:dnd graph close-edge --id <id> --at-session N` | Mark an edge as ended (alliance broke, NPC moved away, etc.) |
 | `/dm:dnd graph extract [--last-session-only]` | Run a Haiku pass over session-log to propose new edges (review-then-apply) |
+| `/dm:maps` | Put the current scene on D&D Beyond Maps: pick a map for the party's location, add it to your D&D Beyond game, place tokens, set fog, start initiative, display it to players. Runs in the browser — D&D Beyond has no API |
 
 ---
 

@@ -337,6 +337,24 @@ _staged: dict[str, dict] = {}   # {char_name: {text, ready, timestamp}}
 _staged_lock = threading.Lock()
 _expected_count = 1             # updated when stats arrive; min 1
 _autorun_threshold: Optional[int] = None  # overrides _expected_count when set via push_stats --autorun-threshold
+# Who the DM is waiting on. Set explicitly by a stats payload {"awaiting": [...]}
+# (send.py --turn), else taken from turn_order.current. When someone is awaited,
+# their Send alone completes the turn: the rest of the party no longer has to
+# press "skip", and the DM no longer has to remember --autorun-threshold 1.
+_awaiting: Optional[list] = None
+
+
+def _awaited_names() -> Optional[list]:
+    """Names the auto-trigger waits for, or None for "the whole party"."""
+    if _awaiting:
+        return list(_awaiting)
+    with _stats_lock:
+        to = _current_stats.get("turn_order") or {}
+        known = {p.get("name", "").lower() for p in _current_stats.get("players", [])}
+    cur = to.get("current") if isinstance(to, dict) else None
+    if cur and cur.lower() in known:
+        return [cur]
+    return None
 
 # Tracks which character names are currently sitting in .input_queue waiting
 # for the DM to press Enter. Set when queue is written, cleared when wrapper
@@ -384,15 +402,24 @@ def _check_auto_trigger() -> None:
         if not _staged:
             return
         everybody_ready = "Everybody" in _staged and _staged["Everybody"]["ready"]
-        all_ready       = all(v["ready"] for v in _staged.values())
-        threshold       = _autorun_threshold if _autorun_threshold is not None else _expected_count
-        enough          = len(_staged) >= threshold or everybody_ready
-        if not (all_ready and enough):
-            return
-        char_names = list(_staged.keys())
-        lines      = [f'[{c}]: {e["text"]}' for c, e in _staged.items()]
+        awaited         = _awaited_names()
+        if awaited and not everybody_ready:
+            ready_ci = {c.lower() for c, v in _staged.items() if v["ready"]}
+            if not all(n.lower() in ready_ci for n in awaited):
+                return
+            taken = [c for c, v in _staged.items() if v["ready"]]
+        else:
+            all_ready = all(v["ready"] for v in _staged.values())
+            threshold = _autorun_threshold if _autorun_threshold is not None else _expected_count
+            enough    = len(_staged) >= threshold or everybody_ready
+            if not (all_ready and enough):
+                return
+            taken = list(_staged.keys())
+        char_names = taken
+        lines      = [f'[{c}]: {_staged[c]["text"]}' for c in taken]
         content    = "\n".join(lines)
-        _staged.clear()
+        for c in taken:
+            _staged.pop(c, None)
 
     try:
         with open(QUEUE_FILE, "w", encoding="utf-8") as f:
@@ -1151,6 +1178,18 @@ _input_lock = threading.Lock()
 # send.py --wait polls GET /dice-request/<id> to know when the DM can move on.
 _dice_pending: dict = {}
 _dice_pending_lock = threading.Lock()
+# Finished requests keep their results so `send.py --wait` can print the rolls
+# (it used to report only that they happened). Bounded: oldest dropped first.
+_dice_done: dict = {}
+_DICE_DONE_MAX = 64
+
+
+def _dice_finish(request_id: str, entry: dict) -> None:
+    """Move a drained request to _dice_done. Caller holds _dice_pending_lock."""
+    _dice_pending.pop(request_id, None)
+    _dice_done[request_id] = {"results": entry.get("results", []), "meta": entry["meta"]}
+    while len(_dice_done) > _DICE_DONE_MAX:
+        _dice_done.pop(next(iter(_dice_done)))
 
 
 def _dice_pending_snapshot() -> list:
@@ -1309,6 +1348,8 @@ def health():
         "text_log": log_count,
         "campaign": camp,
         "clients": client_count,
+        # Whether this server can use the voice key (never the key itself).
+        "tts_key": bool(_tts is not None and _tts.key_source() != "unset"),
     }, 200
 
 
@@ -1411,6 +1452,13 @@ def chunk():
 
     payload: dict = {"text": cleaned}
 
+    # Voice for read-aloud: an explicit "voice" on the block wins; an NPC
+    # otherwise uses the **Voice:** line of its npcs.md entry, a tutor hint
+    # the campaign's tutor_voice. Narration keeps the narrator voice (unset).
+    voice = _block_voice(data, is_npc, is_tutor)
+    if voice:
+        payload["voice"] = voice
+
     if is_action:
         payload["action"] = data["action"]
     elif is_player:
@@ -1434,6 +1482,8 @@ def chunk():
 
     # Store full typed payload so replay preserves action/player/npc/dice/tutor context
     log_entry: dict = {"text": cleaned}
+    if payload.get("voice"):
+        log_entry["voice"] = payload["voice"]
     if is_action:
         log_entry["action"] = data["action"]
     elif is_player:
@@ -1476,6 +1526,18 @@ def stats():
     data = request.get_json(silent=True) or {}
     if not data:
         return "", 204
+
+    if "awaiting" in data:
+        global _awaiting
+        aw = data["awaiting"]
+        if isinstance(aw, str):
+            aw = ([] if aw.strip().lower() in ("", "party", "all", "everyone")
+                  else [n.strip() for n in aw.split(",") if n.strip()])
+        _awaiting = [str(n)[:50] for n in aw] if aw else None
+        _broadcast({"awaiting": _awaiting})
+        if len(data) == 1:
+            _check_auto_trigger()
+            return "", 204
 
     _effect_expire_events: list[dict] = []
     with _stats_lock:
@@ -1656,6 +1718,20 @@ def stats():
                     f["standing"] = "Neutral"
                 validated_factions.append(f)
             _current_stats["factions"] = validated_factions
+
+        # Battle map: "map" replaces it (None clears); "map_moves" moves tokens
+        # in the stored map — [{"name": "Havoc", "x": 4, "y": 2}, ...].
+        if "map" in data:
+            _current_stats["map"] = _clean_map(data["map"])
+        if data.get("map_moves") and isinstance(_current_stats.get("map"), dict):
+            toks = {t.get("name", "").lower(): t for t in _current_stats["map"].get("tokens", [])}
+            for mv in data["map_moves"] if isinstance(data["map_moves"], list) else []:
+                t = toks.get(str(mv.get("name", "")).lower()) if isinstance(mv, dict) else None
+                if t is not None:
+                    try:
+                        t["x"], t["y"] = int(mv["x"]), int(mv["y"])
+                    except (KeyError, TypeError, ValueError):
+                        pass
 
         # quests replaces entirely ([] clears)
         if "quests" in data:
@@ -1873,11 +1949,139 @@ def roll_pref():
 _VOICE_PAT = re.compile(r"^\s*tts_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
 
 
+def _clean_map(m):
+    """Validate a battle-map payload; None clears the map."""
+    if not isinstance(m, dict):
+        return None
+    g = m.get("grid") or {}
+    try:
+        w, h = int(g.get("w", 0)), int(g.get("h", 0))
+    except (TypeError, ValueError):
+        return None
+    if not (1 <= w <= 80 and 1 <= h <= 80):
+        return None
+    cells = [str(r)[:w] for r in (m.get("cells") or [])][:h]
+    tokens = []
+    for t in (m.get("tokens") or [])[:60]:
+        if not isinstance(t, dict) or not t.get("name"):
+            continue
+        try:
+            tok = {"name": str(t["name"])[:40], "x": int(t["x"]), "y": int(t["y"]),
+                   "kind": "pc" if t.get("kind") == "pc" else "npc",
+                   "size": max(1, min(4, int(t.get("size", 1))))}
+        except (KeyError, TypeError, ValueError):
+            continue
+        if isinstance(t.get("hp"), (list, dict)):
+            tok["hp"] = t["hp"]
+        if isinstance(t.get("conditions"), list):
+            tok["conditions"] = [str(c)[:24] for c in t["conditions"][:6]]
+        tokens.append(tok)
+    image = m.get("image")
+    image = str(image) if isinstance(image, str) and re.fullmatch(r"[\w\-./ ]{1,120}", image) else None
+    return {"grid": {"w": w, "h": h, "ft": 5}, "cells": cells, "image": image,
+            "round": int(m.get("round") or 1), "tokens": tokens}
+
+
+@app.route("/map-image/<path:name>")
+def map_image(name):
+    """A battle-map background from the active campaign's maps/ folder."""
+    camp = _active_campaign_name()
+    if not camp or not re.fullmatch(r"[\w\-./ ]{1,120}", name) or ".." in name:
+        return "Not found", 404
+    if not name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        return "Not found", 404
+    try:
+        base = (_find_campaign(camp) / "maps").resolve()
+        rel = name[5:] if name.startswith("maps/") else name
+        path = (base / rel).resolve()
+        path.relative_to(base)
+    except (OSError, ValueError, TypeError):
+        return "Not found", 404
+    if not path.is_file():
+        return "Not found", 404
+    return send_from_directory(str(path.parent), path.name)
+
+
 def _active_campaign_name() -> Optional[str]:
     try:
         return open(CAMP_FILE, encoding="utf-8").read().strip() or None
     except OSError:
         return None
+
+
+_NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z]+)", re.IGNORECASE | re.MULTILINE)
+_TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
+_npc_voice_cache: dict = {}   # (campaign, mtime) -> {npc name lower: voice}
+
+
+def _npc_voices(campaign: str) -> dict:
+    """{npc name (lower case): voice} from the campaign's npcs.md.
+
+    An NPC's section is a `### Name` heading; its voice is a line such as
+    `- **Voice:** Kore` inside that section. Cached on the file's mtime."""
+    try:
+        path = _find_campaign(campaign) / "npcs.md"
+        mtime = path.stat().st_mtime
+    except (OSError, ValueError, TypeError):
+        return {}
+    key = (campaign, mtime)
+    if key in _npc_voice_cache:
+        return _npc_voice_cache[key]
+    voices: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    for sec in re.split(r"^###\s+", text, flags=re.MULTILINE)[1:]:
+        name, _, body = sec.partition("\n")
+        m = _NPC_VOICE_PAT.search(body)
+        if m and _tts is not None and m.group(1) in _tts.VALID_VOICES:
+            voices[name.strip().lower()] = m.group(1)
+    _npc_voice_cache.clear()
+    _npc_voice_cache[key] = voices
+    return voices
+
+
+def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
+    """The read-aloud voice for one block, or "" for the narrator voice."""
+    if _tts is None:
+        return ""
+    v = str(data.get("voice") or "").strip()
+    if v in _tts.VALID_VOICES:
+        return v
+    name = _active_campaign_name()
+    if not name:
+        return ""
+    if is_npc:
+        return _npc_voices(name).get(str(data.get("npc", "")).strip().lower(), "")
+    if is_tutor:
+        try:
+            st = (_find_campaign(name) / "state.md").read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, TypeError):
+            return ""
+        m = _TUTOR_VOICE_PAT.search(st)
+        return m.group(1) if m and m.group(1) in _tts.VALID_VOICES else ""
+    return ""
+
+
+def _tts_key_watch(interval: float = 30.0) -> None:
+    """Announce a voice key that appears (or goes) while the server runs.
+
+    tts.py reads the key on every request, so the server never needed a
+    restart for a new key — but the page stopped asking after a 503. A
+    `tts_available` broadcast tells open pages to try the server voice again.
+    """
+    import time as _t
+    last = None
+    while True:
+        try:
+            now = _tts is not None and _tts.key_source() != "unset"
+        except Exception:
+            now = False
+        if last is not None and now != last:
+            _broadcast({"tts_available": now})
+        last = now
+        _t.sleep(interval)
 
 
 def _read_narrator_voice() -> str:
@@ -1917,6 +2121,15 @@ def _write_narrator_voice(voice: str) -> bool:
     except (OSError, ValueError):
         return False
 
+    # _read_text decodes raw bytes, so a CRLF file arrives with its "\r\n"
+    # intact. Editing in "\n" form and writing back with newline="" keeps the
+    # file's own line endings. Before this, write_text's newline translation on
+    # Windows turned every "\r\n" into "\r\r\n" — one more "\r" per line on
+    # every voice change — and the "\n"-only section regex below never matched
+    # a CRLF file, so the chosen voice was never saved either.
+    eol = "\r\n" if "\r\n" in text else "\n"
+    text = text.replace("\r\n", "\n")
+
     new_line = f"tts_voice: {voice}"
     if _VOICE_PAT.search(text):
         text = _VOICE_PAT.sub(new_line, text, count=1)
@@ -1935,8 +2148,11 @@ def _write_narrator_voice(voice: str) -> bool:
             sep = "" if text.endswith("\n") else "\n"
             text = f"{text}{sep}\n## Session Flags\n{new_line}\n"
 
+    if eol != "\n":
+        text = text.replace("\n", eol)
     try:
-        state.write_text(text, encoding="utf-8")
+        with open(state, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
         return True
     except OSError:
         return False
@@ -2122,6 +2338,12 @@ def player_dice():
     Rolls server-side (secrets.randbelow → uniform, non-spoofable), broadcasts
     a dice-typed entry on the feed, and returns the result so the phone can
     finish its slot-machine animation on the real value.
+
+    `"faces": [14]` (or two faces for a 1d20 with advantage / disadvantage)
+    records a PHYSICAL roll instead: the player rolled a real die and typed
+    the face; the modifier is added here, so nobody has to guess whether "14"
+    was the face or the total. It goes through the same request correlation
+    as a virtual roll, so `send.py --wait` reports both alike.
     """
     if not _token_ok():
         return "Forbidden", 403
@@ -2142,7 +2364,24 @@ def player_dice():
         return jsonify({"error": "out of range"}), 400
     modifier = max(-100, min(100, modifier))
 
+    faces_in = data.get("faces")
+    physical = faces_in is not None
+    if physical:
+        try:
+            faces = [int(f) for f in (faces_in if isinstance(faces_in, list) else [faces_in])]
+        except (TypeError, ValueError):
+            return jsonify({"error": "faces must be integers"}), 400
+        want = 2 if (adv in ("advantage", "disadvantage") and spec == "1d20") else n_dice
+        if len(faces) == 1 and want == 2:
+            want = 1          # one physical d20 typed with advantage on: take it as the kept die
+            adv = "normal"
+        if len(faces) != want or any(not (1 <= f <= n_sides) for f in faces):
+            return jsonify({"error": f"expected {want} face(s) between 1 and {n_sides}"}), 400
+        _faces_iter = iter([[f] for f in faces] if want == 2 else [faces])
+
     def _roll_once() -> list[int]:
+        if physical:
+            return next(_faces_iter)
         return [secrets.randbelow(n_sides) + 1 for _ in range(n_dice)]
 
     if adv in ("advantage", "disadvantage") and spec == "1d20":
@@ -2165,7 +2404,8 @@ def player_dice():
     if modifier:
         breakdown += f" {mod_str}"
     suffix = f" — {label}" if label else ""
-    text   = f"{character} rolls {spec}{mod_str}: {breakdown} = {total}{suffix}"
+    how    = " (rolled at the table)" if physical else ""
+    text   = f"{character} rolls {spec}{mod_str}{how}: {breakdown} = {total}{suffix}"
 
     payload   = {"text": text, "dice": True}
     log_entry = {"text": text, "dice": True}
@@ -2195,9 +2435,17 @@ def player_dice():
                 matched = next((c for c in entry["chars"] if c.lower() == ci), None)
                 if matched is not None:
                     entry["chars"].discard(matched)
+                    dc_v = entry["meta"].get("dc")
+                    entry.setdefault("results", []).append({
+                        "character": matched, "rolls": both or rolls, "kept": kept,
+                        "modifier": modifier, "total": total, "physical": physical,
+                        "natural": kept[0] if spec == "1d20" else None,
+                        "success": (total >= dc_v) if isinstance(dc_v, int) else None,
+                        "text": text,
+                    })
                     pending_changed = True
                     if not entry["chars"]:
-                        _dice_pending.pop(req_id, None)
+                        _dice_finish(req_id, entry)
     if pending_changed:
         _broadcast({"dice_pending": _dice_pending_snapshot()})
 
@@ -2212,6 +2460,7 @@ def player_dice():
         "subtotal": subtotal,
         "total": total,
         "text": text,
+        "physical": physical,
         "request_id": req_id or None,
     }), 200
 
@@ -2266,6 +2515,7 @@ def dice_request():
                 "chars": set(trackable),
                 "meta": {"spec": spec, "modifier": modifier, "advantage": adv, "label": label, "dc": dc_val},
                 "started_at": time.time(),
+                "results": [],
             }
         _broadcast({"dice_pending": _dice_pending_snapshot()})
 
@@ -2305,11 +2555,17 @@ def dice_request_status(request_id):
     with _dice_pending_lock:
         entry = _dice_pending.get(request_id)
         if entry is None or not entry["chars"]:
-            return jsonify({"complete": True, "pending": []}), 200
+            done = _dice_done.get(request_id) or {}
+            meta = done.get("meta") or {}
+            return jsonify({"complete": True, "pending": [],
+                            "results": done.get("results", []),
+                            "label": meta.get("label", ""), "dc": meta.get("dc")}), 200
         return jsonify({
             "complete": False,
             "pending": sorted(entry["chars"]),
+            "results": list(entry.get("results", [])),
             "label": entry["meta"].get("label", ""),
+            "dc": entry["meta"].get("dc"),
             "started_at": entry["started_at"],
         }), 200
 
@@ -2435,7 +2691,10 @@ def stage_input():
         return "Forbidden", 403
 
     # In solo mode (1 expected player), skip the manual Ready step and auto-trigger.
-    solo = (_expected_count == 1)
+    # The same when the DM is waiting on exactly this character (their turn).
+    awaited = _awaited_names()
+    solo = (_expected_count == 1) or bool(
+        awaited and len(awaited) == 1 and awaited[0].lower() == character.lower())
 
     with _staged_lock:
         _staged[character] = {
@@ -2689,6 +2948,8 @@ def stream():
     # Replay threshold so the ready counter reflects the correct target on reconnect.
     if _autorun_threshold is not None:
         q.put_nowait({"autorun_threshold": _autorun_threshold})
+    if _awaiting:
+        q.put_nowait({"awaiting": list(_awaiting)})
 
     # Send any pending device approval requests so the DM sees them on reconnect.
     with _devices_lock:
@@ -2733,6 +2994,8 @@ if __name__ == "__main__":
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)
+    if _tts is not None:
+        threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
 
     host = "0.0.0.0" if _LAN_MODE else "localhost"
     # TLS — only enabled when --tls is explicitly passed; HTTP is the default.

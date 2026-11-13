@@ -33,6 +33,8 @@ import random
 import re
 import sys
 
+from utf8io import write_text as write_keep_eol
+
 try:
     from paths import find_campaign
 except ImportError:  # pragma: no cover
@@ -237,7 +239,7 @@ def cmd_chaos(args) -> int:
 
     if args.chaos_action == "set":
         new = clamp_chaos(args.value)
-        state_path.write_text(write_chaos(text, new), encoding="utf-8")
+        write_keep_eol(state_path, write_chaos(text, new))
         print(f"chaos factor: {current} → {new}")
         return 0
     if args.chaos_action == "adjust":
@@ -245,7 +247,7 @@ def cmd_chaos(args) -> int:
             print("error: pass exactly one of --pc-won / --pc-lost", file=sys.stderr)
             return 2
         new = adjust_chaos(current, pc_proactive=args.pc_won)
-        state_path.write_text(write_chaos(text, new), encoding="utf-8")
+        write_keep_eol(state_path, write_chaos(text, new))
         verb = "PC in control" if args.pc_won else "world pushes back"
         print(f"chaos factor: {current} → {new}  ({verb})")
         return 0

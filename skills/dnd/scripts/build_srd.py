@@ -28,11 +28,9 @@ from datetime import datetime, timezone
 try:
     import yaml
 except ImportError:
-    print("PyYAML required for FoundryVTT data. Install: pip3 install pyyaml")
-    print("Run with --no-fvtt to skip class features and build spells/items only.")
-    yaml = None  # type: ignore
+    yaml = None  # type: ignore   # cmd_build refuses to run without it unless --no-fvtt
 
-from paths import data_dir as _data_dir
+from paths import data_dir as _data_dir, built_data_dir as _built_data_dir
 DATA_DIR  = str(_data_dir())
 
 # Ruleset configuration. 2014 is the historical default; 2024 is partial
@@ -110,8 +108,14 @@ def _bits_url(ruleset: str) -> str:
 
 def _out_file(ruleset: str) -> str:
     """Return output path for the given ruleset's compiled SRD."""
-    name = "dnd5e_srd_2024.json" if ruleset == RULESET_2024 else "dnd5e_srd.json"
-    return os.path.join(DATA_DIR, name)
+    if ruleset == RULESET_2024:
+        # Not the plugin directory: a reinstall replaces that and the build is lost.
+        return os.path.join(str(_built_data_dir()), "dnd5e_srd_2024.json")
+    return os.path.join(DATA_DIR, "dnd5e_srd.json")
+
+
+class BuildIncomplete(RuntimeError):
+    """A source the dataset needs produced nothing; the file is not written."""
 
 
 # Module-level handles kept for backwards compatibility with existing
@@ -1932,7 +1936,8 @@ def _latest_sha(url: str) -> str:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def cmd_status(ruleset: str = DEFAULT_RULESET) -> None:
-    out_file = _out_file(ruleset)
+    from paths import srd_path
+    out_file = str(srd_path(ruleset))   # built copy, else the bundled one
     if not os.path.exists(out_file):
         print(f"Dataset not built for ruleset {ruleset}. "
               f"Run build_srd.py --ruleset {ruleset} to create it.")
@@ -1964,9 +1969,16 @@ def cmd_status(ruleset: str = DEFAULT_RULESET) -> None:
 
 def cmd_build(skip_fvtt: bool = False,
               ruleset: str = DEFAULT_RULESET) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    if yaml is None and not skip_fvtt:
+        # Used to print a line and carry on, so a 2024 build came out with 0
+        # spells and 0 features and nothing said it was broken.
+        raise BuildIncomplete(
+            "PyYAML is not installed, and the FoundryVTT spells and class features "
+            "need it. Install it with `python -m pip install pyyaml` (or build "
+            "without them using --no-fvtt).")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out_file = _out_file(ruleset)
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
 
     print(f"── Building D&D 5e SRD dataset (ruleset: {ruleset}) ──────────")
     print()
@@ -1997,6 +2009,14 @@ def cmd_build(skip_fvtt: bool = False,
 
     counts = {k: len(v) for k, v in categories.items()}
     total  = sum(counts.values())
+
+    if not skip_fvtt:
+        empty = [k for k in (("spells", "features") if ruleset == RULESET_2024 else ("features",))
+                 if not counts.get(k)]
+        if empty:
+            raise BuildIncomplete(
+                f"{', '.join(empty)} came out empty — a source failed to download or "
+                f"parse (see the lines above). {out_file} was not written.")
 
     license_attribution = [
         "Includes content from D&D 5e SRD 5.1 (CC-BY-4.0) — "
@@ -2064,7 +2084,12 @@ def main() -> None:
     if "--status" in args:
         cmd_status(ruleset)
     else:
-        cmd_build(skip_fvtt="--no-fvtt" in args, ruleset=ruleset)
+        try:
+            cmd_build(skip_fvtt="--no-fvtt" in args, ruleset=ruleset)
+        except BuildIncomplete as exc:
+            print(file=sys.stderr)
+            print(f"build_srd.py: BUILD FAILED — {exc}", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

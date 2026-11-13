@@ -15,6 +15,14 @@
 *Table-specific calibration: what lands for this party, what to lean into, what to avoid. Read at every /dnd load. A style request made mid-session is written here at once, replacing any earlier note it contradicts.*
 *(none yet)*
 
+### Narration
+*The table's narration rules, kept every turn. Edit to taste; delete a line to drop it.*
+- **Length:** follow the display's Narration slider (`[[Narration length …]]`); without it, about 120–200 words a turn. Never pad.
+- **Name who acts next:** every turn ends by naming the character whose move it is.
+- **End on a question:** close with a direct question to that named character ("Havoc, what do you do?").
+- **Teach the roll:** when a first-time player rolls, say the die, what to add, and the number to beat ("roll a d20 and add 3; 13 or more succeeds").
+- **One voice per speaker:** NPC lines go in their own `npc` block so they are read in that NPC's voice (`**Voice:**` in npcs.md).
+
 ## Glossary
 *One translation per game term, for a table playing in a language other than English. Settle each term the first time it comes up and keep it — e.g. `Prone — Derribado`, `Short Rest — Descanso corto`. Read at every /dnd load.*
 *(none yet)*
@@ -159,7 +167,8 @@ revision_log: []
 *(leave empty until the first arc completes)*
 
 ## Session Flags
-*(tutor_mode, autorun, autorun_interval, tts_voice, sfx_languages, autosave — session-scoped flags set via /dnd commands or by the display companion)*
+*(tutor_mode, autorun, autorun_interval, tts_voice, tutor_voice, sfx_languages, autosave — session-scoped flags set via /dnd commands or by the display companion)*
+*(tutor_voice: a read-aloud voice for DM hints, different from tts_voice — e.g. `tutor_voice: Zephyr`. NPC voices live on each NPC's **Voice:** line in npcs.md.)*
 *(autosave: on|off — default on. Governs the behind-the-scenes continuity checkpoint (Live State Flags + graph + session tail). Toggle with /dm:dnd autosave on|off.)*
 
 ## DM Notes (hidden from players)

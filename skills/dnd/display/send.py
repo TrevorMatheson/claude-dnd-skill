@@ -76,7 +76,8 @@ if _DISPLAY_DIR not in sys.path:
 from runtime_paths import rt          # writable runtime dir (update-safe)
 _SCHEME_FILE = os.path.join(_DISPLAY_DIR, ".scheme")   # launch marker → code dir
 _SCHEME = open(_SCHEME_FILE, encoding="utf-8").read().strip() if os.path.exists(_SCHEME_FILE) else "http"
-BASE_URL    = f"{_SCHEME}://localhost:5001"
+BASE_URL    = (os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/")
+               or f"{_SCHEME}://localhost:5001")
 FLASK_URL   = f"{BASE_URL}/chunk"
 STATS_URL   = f"{BASE_URL}/stats"
 HEALTH_URL  = f"{BASE_URL}/health"
@@ -372,6 +373,330 @@ def _build_stats_payload(args) -> "dict | None":
     return {"players": list(players.values())}
 
 
+def _stdin_has_data(timeout: float = 0.3) -> bool:
+    """True if reading stdin will not block: a file, a device such as
+    /dev/null, or a pipe with data or EOF within `timeout`."""
+    import stat as _stat
+    try:
+        fd = sys.stdin.fileno()
+        mode = os.fstat(fd).st_mode
+    except (OSError, ValueError, AttributeError):
+        return False
+    if _stat.S_ISREG(mode) or _stat.S_ISCHR(mode):
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+            handle = msvcrt.get_osfhandle(fd)
+            avail = wintypes.DWORD(0)
+            end = time.time() + timeout
+            while True:
+                ok = ctypes.windll.kernel32.PeekNamedPipe(
+                    wintypes.HANDLE(handle), None, 0, None, ctypes.byref(avail), None)
+                if not ok:
+                    return True      # broken pipe = EOF: read returns at once
+                if avail.value:
+                    return True
+                if time.time() >= end:
+                    return False
+                time.sleep(0.02)
+        except Exception:
+            return False
+    import select
+    try:
+        r, _, _ = select.select([sys.stdin], [], [], timeout)
+        return bool(r)
+    except (OSError, ValueError):
+        return False
+
+
+def _print_dice_results(request_id: str, st: dict, as_json: bool) -> None:
+    """Print each roll a dice request received: one line per character, or JSON."""
+    results = st.get("results") or []
+    if as_json:
+        print(json.dumps({"request_id": request_id, "label": st.get("label", ""),
+                          "dc": st.get("dc"), "results": results}), flush=True)
+        return
+    dc = st.get("dc")
+    for r in results:
+        bits = [f"{r.get('character')}: {r.get('total')}"]
+        if r.get("natural") is not None:
+            bits.append(f"(natural {r['natural']}, {r.get('modifier', 0):+d})")
+        if r.get("physical"):
+            bits.append("[physical die]")
+        if r.get("success") is not None:
+            bits.append(f"vs DC {dc} — {'PASS' if r['success'] else 'FAIL'}")
+        print(" ".join(bits), flush=True)
+
+
+def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None, dc=None,
+                 wait=False, wait_timeout=600, as_json=False) -> int:
+    """POST a dice request to the phones / on-screen roller; optionally wait.
+
+    Prints the request id first (callers correlate on it), then, with `wait`,
+    one line per roll (or JSON). Returns 0, 1 on a failed POST, 2 on timeout.
+    """
+    body = {"characters": chars, "spec": spec, "modifier": modifier, "advantage": advantage}
+    if label:
+        body["label"] = label
+    if dc is not None:
+        body["dc"] = dc
+    _token = _read_token()
+
+    # Direct urllib call (rather than _post) because we need the JSON response body.
+    headers = {"Content-Type": "application/json"}
+    if _token:
+        headers["X-DND-Token"] = _token
+    try:
+        req = urllib.request.Request(DICE_REQ_URL, data=json.dumps(body).encode(),
+                                     headers=headers, method="POST")
+        resp = urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
+        resp_body = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as e:
+        print(f"send.py: dice-request failed: {e}", file=sys.stderr)
+        return 1
+
+    request_id = resp_body.get("request_id", "")
+    pending = list(resp_body.get("pending") or [])
+    # Machine-readable on stdout so callers can correlate (cancel, log, etc.).
+    # flush=True because Python block-buffers stdout when redirected.
+    print(request_id, flush=True)
+    if not wait:
+        return 0
+    if not pending:
+        # "any" targets aren't tracked, so --wait is a no-op there.
+        print(f"send.py: --wait with no trackable characters (target={chars}) — nothing to wait for.",
+              file=sys.stderr)
+        return 0
+    status_url = f"{DICE_REQ_URL}/{request_id}"
+    poll_headers = {"X-DND-Token": _token} if _token else {}
+    deadline = time.time() + max(1, wait_timeout)
+    last_pending: list = list(pending)
+    print(f"send.py: waiting for rolls from: {', '.join(pending)}", file=sys.stderr)
+    while time.time() < deadline:
+        try:
+            sreq = urllib.request.Request(status_url, headers=poll_headers, method="GET")
+            st = json.loads(urllib.request.urlopen(sreq, timeout=TIMEOUT, context=_SSL_CTX)
+                            .read().decode("utf-8") or "{}")
+        except Exception as e:
+            print(f"send.py: poll error ({e}) — retrying", file=sys.stderr)
+            time.sleep(1.0)
+            continue
+        if st.get("complete"):
+            print("send.py: all rolls received.", file=sys.stderr)
+            _print_dice_results(request_id, st, as_json)
+            return 0
+        remaining = st.get("pending") or []
+        if remaining != last_pending:
+            print(f"send.py: still waiting on: {', '.join(remaining)}", file=sys.stderr)
+            last_pending = list(remaining)
+        time.sleep(0.5)
+    print(f"send.py: timeout after {wait_timeout}s — still pending: "
+          f"{', '.join(last_pending)}", file=sys.stderr)
+    return 2
+
+
+# ── One-call turns ────────────────────────────────────────────────────────────
+# A DM turn used to be 4–6 separate sends (player echo, dice lines, narration,
+# NPC lines, tutor hint, stats), each with its own stdin rules, easy to get out
+# of order. `send.py --turn turn.json` (or `--turn -` for stdin) sends the whole
+# turn in order:
+#
+#   {"blocks": [
+#      {"action": "Havoc", "text": "Havoc swings at the rat."},
+#      {"dice": true, "text": "Havoc: 2d20 adv [7, 16] +5 = 21 vs AC 12 — HIT"},
+#      {"text": "The blade bites ..."},                        # narration
+#      {"npc": "Mira", "text": "Behind you!", "voice": "Kore"},
+#      {"tutor": true, "text": "Advantage: roll two d20s, keep the higher."},
+#      {"xp_award": {"names": ["Havoc"], "xp": 25, "reason": "rat"}},
+#      {"inspiration_award": "Anony", "reason": "great line"}],
+#    "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
+#    "turn": "Anony", "round": 2,          # turn pointer (turn_order.current)
+#    "awaiting": ["Anony"],                # whose Send completes the turn ("party" = all)
+#    "moves": [{"name": "Giant Rat", "x": 4, "y": 6, "hp": "3/7"}],  # battle map (combat.py map):
+#                                          # checked against walls and speed before anything is sent
+#    "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3,
+#                     "label": "Dex save", "dc": 13, "wait": true}}
+#
+# A block may also be written {"type": "npc", "name": "Mira", "text": "..."}.
+# Block order is display order. Stats, turn pointer, awaiting and moves go in
+# one /stats post after the blocks, so the sidebar changes as the narration
+# lands; the dice request (if any) is last.
+
+_BLOCK_TYPES = ("narration", "action", "player", "npc", "dice", "tutor")
+
+
+def _load_turn(src: str) -> dict:
+    try:
+        if src == "-":
+            raw = sys.stdin.read()
+        else:
+            with open(src, encoding="utf-8") as f:
+                raw = f.read()
+        turn = json.loads(raw)
+    except (OSError, ValueError) as exc:
+        print(f"send.py: --turn could not read {src!r}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    if isinstance(turn, list):
+        turn = {"blocks": turn}
+    if not isinstance(turn, dict):
+        print("send.py: --turn expects a JSON object (or a list of blocks)", file=sys.stderr)
+        sys.exit(2)
+    return turn
+
+
+def _turn_block_payloads(block: dict) -> list:
+    """Chunk payloads for one turn block, in order. Raises ValueError."""
+    if not isinstance(block, dict):
+        raise ValueError(f"block is not an object: {block!r}")
+    b = dict(block)
+    kind = b.pop("type", None)
+    if kind is not None:
+        if kind not in _BLOCK_TYPES + ("xp_award", "inspiration_award", "milestone_award"):
+            raise ValueError(f"unknown block type {kind!r}")
+        name = b.pop("name", None)
+        if kind in ("action", "player", "npc"):
+            if not name:
+                raise ValueError(f"{kind} block needs a name")
+            b[kind] = name
+        elif kind in ("dice", "tutor"):
+            b[kind] = True
+    if b.get("xp_award"):
+        xp = dict(b["xp_award"])
+        if "summary" not in xp:
+            names = ", ".join(xp.get("names", []))
+            rsn = xp.get("reason", "")
+            xp["summary"] = f"{names} — {xp.get('xp', 0)} XP" + (f" ({rsn})" if rsn else "")
+        return [{"xp_award": xp, "text": xp["summary"]}]
+    if b.get("inspiration_award"):
+        p = {"inspiration_award": str(b["inspiration_award"]), "text": str(b["inspiration_award"])}
+        if b.get("reason"):
+            p["reason"] = str(b["reason"])
+        return [p]
+    text = str(b.get("text") or "")
+    if not text.strip():
+        raise ValueError(f"block has no text: {block!r}")
+    tags = {k: b[k] for k in ("action", "player", "npc", "dice", "tutor") if b.get(k)}
+    if len(tags) > 1:
+        raise ValueError(f"block has more than one kind: {sorted(tags)}")
+    out = []
+    for chunk in _split_paragraphs(text):
+        p = {"text": chunk, **tags}
+        if b.get("voice"):
+            p["voice"] = str(b["voice"])
+        out.append(p)
+    return out
+
+
+def _turn_stats(turn: dict) -> "dict | None":
+    stats = dict(turn.get("stats") or {})
+    if turn.get("turn") is not None or turn.get("round") is not None:
+        to = dict(stats.get("turn_order") or {})
+        if turn.get("turn") is not None:
+            to["current"] = turn["turn"]
+        if turn.get("round") is not None:
+            to["round"] = int(turn["round"])
+        stats["turn_order"] = to
+    if "awaiting" in turn:
+        stats["awaiting"] = turn["awaiting"]
+    return stats or None
+
+
+def _apply_turn_moves(turn: dict) -> "dict | None":
+    """Apply a turn's token moves to the campaign's battle map (validated by
+    battlemap.py: walls, speed, occupied squares) and return the display map
+    payload. Raises ValueError naming the move that failed; nothing is saved
+    then. Each move: {"name", "x", "y", "dash"?, "force"?, "turn"?: true}."""
+    moves = turn.get("moves")
+    if not moves:
+        return None
+    _scripts = os.path.join(_DISPLAY_DIR, os.pardir, "scripts")
+    if _scripts not in sys.path:
+        sys.path.insert(0, _scripts)
+    import battlemap as bm
+    from paths import find_campaign
+    camp = turn.get("campaign")
+    if not camp:
+        try:
+            camp = open(rt(".campaign"), encoding="utf-8").read().strip()
+        except OSError:
+            camp = ""
+    if not camp:
+        raise ValueError("moves need a campaign: add \"campaign\" to the turn or load one first")
+    cdir = find_campaign(camp)
+    try:
+        m = bm.load(cdir)
+        for mv in moves:
+            if mv.get("turn"):
+                bm.start_turn(m, mv["name"])
+            if "x" in mv and "y" in mv:
+                bm.move(m, mv["name"], int(mv["x"]), int(mv["y"]),
+                        dash=bool(mv.get("dash")), force=bool(mv.get("force")))
+            if "hp" in mv:
+                hp = [int(v) for v in str(mv["hp"]).split("/")]
+                bm.set_hp(m, mv["name"], hp[0], hp[1] if len(hp) > 1 else None)
+    except (bm.MapError, KeyError, TypeError) as exc:
+        raise ValueError(f"move refused: {exc}")
+    bm.save(cdir, m)
+    return bm.display_payload(m)
+
+
+def send_turn(turn: dict, as_json: bool = False) -> int:
+    """Send a whole DM turn in order. Returns a process exit code."""
+    unknown = set(turn) - {"blocks", "stats", "turn", "round", "awaiting", "moves", "dice_request",
+                           "campaign"}
+    if unknown:
+        print(f"send.py: --turn has unknown keys: {', '.join(sorted(unknown))}", file=sys.stderr)
+        return 2
+    try:
+        payloads = [p for blk in (turn.get("blocks") or []) for p in _turn_block_payloads(blk)]
+    except ValueError as exc:
+        print(f"send.py: --turn: {exc}", file=sys.stderr)
+        return 2
+    for p in payloads:
+        issues = _validate_payload(p, "chunk")
+        if issues:
+            print(f"send.py: --turn block invalid: {'; '.join(issues)}", file=sys.stderr)
+            return 2
+    try:
+        map_payload = _apply_turn_moves(turn)
+    except ValueError as exc:
+        print(f"send.py: --turn: {exc} — nothing was sent", file=sys.stderr)
+        return 2
+
+    token = _read_token()
+    for p in payloads:
+        _post(FLASK_URL, json.dumps(p).encode("utf-8"), token)
+    stats = _turn_stats(turn)
+    if map_payload is not None:
+        stats = dict(stats or {})
+        stats["map"] = map_payload
+    if stats:
+        _post(STATS_URL, json.dumps(stats).encode("utf-8"), token)
+
+    failed = [x for x in _SEND_LOG if not x["ok"]]
+    if failed:
+        if any(x.get("reason") == "display offline" for x in failed):
+            print("send.py: display offline — turn dropped", file=sys.stderr)
+            return 0
+        print("send.py: PARTIAL FAILURE — " +
+              ", ".join(f"{x['endpoint']}={x.get('reason', '?')}" for x in failed), file=sys.stderr)
+        return 3
+
+    dr = turn.get("dice_request")
+    if dr:
+        chars = dr.get("characters") or dr.get("character") or "any"
+        if isinstance(chars, str):
+            chars = [c.strip() for c in chars.split(",") if c.strip()] or ["any"]
+        return dice_request(chars, dr.get("spec", "1d20"), int(dr.get("modifier", 0)),
+                            dr.get("advantage", "normal"), dr.get("label"), dr.get("dc"),
+                            wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", 600)),
+                            as_json=as_json)
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Send text to the DnD display server.")
     parser.add_argument(
@@ -436,8 +761,10 @@ def main() -> None:
     parser.add_argument("--wait", action="store_true",
         help='With --dice-request: block until every prescribed character has rolled '
              '(polls /dice-request/<id>). Exits non-zero on timeout.')
-    parser.add_argument("--wait-timeout", type=int, default=120, metavar="SECONDS",
-        help='Timeout for --wait (default 120s). On timeout, prints still-pending '
+    parser.add_argument("--json", action="store_true",
+        help="With --wait: print the results as one JSON object on stdout.")
+    parser.add_argument("--wait-timeout", type=int, default=600, metavar="SECONDS",
+        help='Timeout for --wait (default 600s — a real table is slow). On timeout, prints still-pending '
              'characters to stderr and exits 2.')
 
     # ── Stat-change flags (Option B — bundled with narration) ─────────────────
@@ -465,6 +792,14 @@ def main() -> None:
         help="End a timed effect: NAME:SPELL (narrative end — broken, dispelled, player drops)")
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
+    parser.add_argument("--turn", metavar="FILE",
+        help="Send a whole DM turn from a JSON file ('-' = stdin): blocks in order, then "
+             "stats / turn pointer / awaiting / moves, then an optional dice request.")
+    parser.add_argument("--text", metavar="TEXT",
+        help="Body text given inline instead of on stdin (stdin is then not read).")
+    parser.add_argument("--no-body", action="store_true",
+        help="Never read stdin. For award / stat-only sends from a tool call whose "
+             "stdin is an open pipe that never closes.")
     parser.add_argument("--verify", action="store_true",
         help="After sending, GET /health and confirm the broadcast was received. "
              "Surfaces a clear stderr line on mismatch — use during dev/debug.")
@@ -482,73 +817,17 @@ def main() -> None:
     # reading piped stdin under the isatty() gate lets bundled narration flow
     # through to the text-send block while bare award calls don't block.
     # ── Dice request (DM → phones) — broadcast + optional blocking wait ──────
+    if args.turn:
+        sys.exit(send_turn(_load_turn(args.turn), as_json=args.json))
+
     if args.dice_request:
         # Comma-split character list so the DM can address multiple players at once,
         # e.g. --character "Piper,Mira,Aldric"  → all three must roll before --wait returns.
         chars = [c.strip() for c in (args.character or "any").split(",") if c.strip()] or ["any"]
-        body = {
-            "characters": chars,
-            "spec": args.spec,
-            "modifier": args.modifier,
-            "advantage": args.advantage,
-        }
-        if args.label: body["label"] = args.label
-        if args.dc is not None: body["dc"] = args.dc
-        _token = _read_token()
-
-        # Direct urllib call (rather than _post) because we need the JSON response body.
-        headers = {"Content-Type": "application/json"}
-        if _token: headers["X-DND-Token"] = _token
-        try:
-            req = urllib.request.Request(
-                DICE_REQ_URL, data=json.dumps(body).encode(),
-                headers=headers, method="POST",
-            )
-            resp = urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
-            resp_body = json.loads(resp.read().decode("utf-8") or "{}")
-        except Exception as e:
-            print(f"send.py: dice-request failed: {e}", file=sys.stderr)
-            sys.exit(1)
-
-        request_id = resp_body.get("request_id", "")
-        pending    = list(resp_body.get("pending") or [])
-        # Machine-readable on stdout so callers can correlate (cancel, log, etc.).
-        # flush=True because Python block-buffers stdout when redirected, and
-        # callers want the id immediately to dispatch rolls / cancellation.
-        print(request_id, flush=True)
-
-        if args.wait:
-            if not pending:
-                # "any" targets aren't tracked, so --wait is a no-op there.
-                print(f"send.py: --wait with no trackable characters (target={chars}) — nothing to wait for.",
-                      file=sys.stderr)
-            else:
-                status_url = f"{DICE_REQ_URL}/{request_id}"
-                poll_headers = {"X-DND-Token": _token} if _token else {}
-                deadline = time.time() + max(1, args.wait_timeout)
-                last_pending: list = list(pending)
-                print(f"send.py: waiting for rolls from: {', '.join(pending)}", file=sys.stderr)
-                while time.time() < deadline:
-                    try:
-                        sreq = urllib.request.Request(status_url, headers=poll_headers, method="GET")
-                        s = urllib.request.urlopen(sreq, timeout=TIMEOUT, context=_SSL_CTX)
-                        st = json.loads(s.read().decode("utf-8") or "{}")
-                    except Exception as e:
-                        print(f"send.py: poll error ({e}) — retrying", file=sys.stderr)
-                        time.sleep(1.0)
-                        continue
-                    if st.get("complete"):
-                        print(f"send.py: all rolls received.", file=sys.stderr)
-                        break
-                    remaining = st.get("pending") or []
-                    if remaining != last_pending:
-                        print(f"send.py: still waiting on: {', '.join(remaining)}", file=sys.stderr)
-                        last_pending = list(remaining)
-                    time.sleep(0.5)
-                else:
-                    print(f"send.py: timeout after {args.wait_timeout}s — still pending: "
-                          f"{', '.join(last_pending)}", file=sys.stderr)
-                    sys.exit(2)
+        rc = dice_request(chars, args.spec, args.modifier, args.advantage, args.label, args.dc,
+                          wait=args.wait, wait_timeout=args.wait_timeout, as_json=args.json)
+        if rc:
+            sys.exit(rc)
 
         # If no other action requested, exit clean (don't fall through to stdin read).
         _other = (args.player or args.npc or args.dice or args.tutor or args.action
@@ -559,10 +838,25 @@ def main() -> None:
             return
 
     _has_content_flag = bool(args.player or args.npc or args.dice or args.tutor or args.action)
-    if _has_content_flag:
+    # Body-optional actions: with one of these and no content flag, stdin is
+    # read only if something is already there. A tool call's stdin can be a
+    # pipe that is never written or closed, and `--xp-award` used to hang on
+    # it until killed.
+    _body_optional = bool(args.inspiration_award or args.inspiration_spend
+                          or args.milestone_award or args.milestone_spend
+                          or args.xp_award or _build_stats_payload(args))
+    if args.text is not None:
+        text = args.text
+    elif args.no_body:
+        text = ""
+    elif _has_content_flag:
         text = sys.stdin.read()
+    elif sys.stdin is None or sys.stdin.isatty():
+        text = ""
+    elif _body_optional:
+        text = sys.stdin.read() if _stdin_has_data() else ""
     else:
-        text = "" if sys.stdin.isatty() else sys.stdin.read()
+        text = sys.stdin.read()
     token = _read_token()
 
     # ── Inspiration award/spend ──────────────────────────────────────────────

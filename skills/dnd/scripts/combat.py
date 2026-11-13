@@ -12,6 +12,7 @@ Usage:
         Prints the current combat tracker table from a JSON state blob.
 
     python3 combat.py attack --atk <bonus> --ac <target_ac> --dmg <notation> [--crit]
+                             [--advantage | --disadvantage]
                              [--effects <entity> -c <campaign>]
         Resolves a single attack roll and damage. --crit makes any hit a
         critical hit (a paralyzed or unconscious target within 5 ft); a
@@ -40,7 +41,9 @@ if hasattr(sys.stdout, "reconfigure"):
     # stdout, and refusing to start a combat over it would be the worse trade.
     except Exception: pass
 
+import argparse
 import json
+import pathlib
 import os
 import secrets
 import sys
@@ -107,7 +110,8 @@ def _roll_mod(value: str, double_dice: bool = False) -> tuple[int, list[int]]:
 
 
 def resolve_attack(atk_bonus: int, target_ac: int, dmg_notation: str, is_crit: bool = False,
-                   attack_mods: list | None = None, damage_mods: list | None = None) -> dict:
+                   attack_mods: list | None = None, damage_mods: list | None = None,
+                   advantage: bool = False, disadvantage: bool = False) -> dict:
     """Roll one attack.
 
     `is_crit` is the auto-crit case: an attack that hits a paralyzed or
@@ -115,8 +119,17 @@ def resolve_attack(atk_bonus: int, target_ac: int, dmg_notation: str, is_crit: b
     shows. It was accepted and never read, so `--crit` did nothing. A
     natural 1 still misses. `attack_mods` / `damage_mods` are
     [(label, '+1d4'), ...] from tracker.active_modifiers.
+
+    `advantage` / `disadvantage` roll two d20s and keep the higher / lower,
+    the same rule as dice.py's `d20 adv`; having both cancels to one d20.
     """
-    raw = d(20)
+    adv_mode = None
+    if advantage and not disadvantage:
+        adv_mode = "advantage"
+    elif disadvantage and not advantage:
+        adv_mode = "disadvantage"
+    d20_rolls = [d(20)] if adv_mode is None else [d(20), d(20)]
+    raw = max(d20_rolls) if adv_mode == "advantage" else min(d20_rolls)
     mod_rolls = []
     mod_total = 0
     for label, value in attack_mods or []:
@@ -137,6 +150,8 @@ def resolve_attack(atk_bonus: int, target_ac: int, dmg_notation: str, is_crit: b
         "auto_crit": bool(is_crit and hit and raw != 20),
         "fumble": raw == 1,
         "attack_mods": mod_rolls,
+        "d20_rolls": d20_rolls,
+        "adv_mode": adv_mode,
     }
 
     if hit:
@@ -168,7 +183,12 @@ def format_attack(r: dict) -> str:
         flag = " *** FUMBLE — automatic miss ***"
 
     mods = "".join(f" + {m['label']} {m['value']}({m['total']:+d})" for m in r.get("attack_mods", []))
-    atk_str = f"d20({r['d20']}) + {r['attack_bonus']}{mods} = {r['total']} vs AC {r['target_ac']}"
+    if r.get("adv_mode"):
+        word = "adv" if r["adv_mode"] == "advantage" else "dis"
+        die = f"2d20 {word} {r['d20_rolls']}→{r['d20']}"
+    else:
+        die = f"d20({r['d20']})"
+    atk_str = f"{die} + {r['attack_bonus']}{mods} = {r['total']} vs AC {r['target_ac']}"
     outcome = "HIT" if r["hit"] else "MISS"
     lines.append(f"Attack: {atk_str} — {outcome}{flag}")
 
@@ -332,25 +352,225 @@ def list_masteries() -> str:
     return "\n".join(lines)
 
 
-def _opt(args: list, flag: str):
-    return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else None
+def build_parser() -> argparse.ArgumentParser:
+    """CLI. Every subcommand rejects options it does not know: the old
+    hand-rolled argv scan silently dropped --advantage, so a Pack Tactics
+    attack was rolled on one d20."""
+    p = argparse.ArgumentParser(prog="combat.py", description="D&D 5e combat helper")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("init", help="roll initiative for a JSON array of combatants")
+    s.add_argument("combatants", help='JSON array of {"name","dex_mod","hp","ac","type"}')
+
+    s = sub.add_parser("tracker", help="print the tracker table from a JSON state blob")
+    s.add_argument("state")
+    s.add_argument("round", nargs="?", type=int, default=1)
+
+    s = sub.add_parser("attack", help="resolve one attack roll and its damage")
+    s.add_argument("--atk", type=int, required=True, help="attack bonus")
+    s.add_argument("--ac", type=int, required=True, help="target AC")
+    s.add_argument("--dmg", required=True, help="damage notation, e.g. 1d8+3")
+    s.add_argument("--crit", action="store_true",
+                   help="any hit is a critical (helpless target within 5 ft)")
+    s.add_argument("--advantage", "--adv", action="store_true",
+                   help="roll 2d20, keep the higher")
+    s.add_argument("--disadvantage", "--dis", action="store_true",
+                   help="roll 2d20, keep the lower (both flags cancel)")
+    s.add_argument("--effects", metavar="ENTITY",
+                   help="add tracker.py attack/damage modifiers held by ENTITY")
+    s.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"))
+    s.add_argument("--from", dest="attacker", metavar="NAME",
+                   help="attacker's token on the battle map (with --target: checks reach/range)")
+    s.add_argument("--target", metavar="NAME", help="target's token on the battle map")
+    s.add_argument("--reach", type=int, metavar="FT", help="melee reach in feet (default 5)")
+    s.add_argument("--range", dest="rng", metavar="NORMAL/LONG",
+                   help="ranged attack, e.g. 80/320: long range and a hostile within 5 ft give disadvantage")
+    _mastery_args(s)
+
+    # ── battle map (battlemap.py) ──
+    def _camp(sp):
+        sp.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"), required=False)
+        sp.add_argument("--no-push", action="store_true", help="don't update the display's map")
+
+    s = sub.add_parser("map", help="battle map: init | show | clear | push")
+    s.add_argument("action", choices=["init", "show", "clear", "push"])
+    s.add_argument("--layout", metavar="FILE", help="text layout (# wall . floor ~ difficult T obstacle D door)")
+    s.add_argument("--size", metavar="WxH", help="plain grid of W by H squares")
+    s.add_argument("--image", metavar="PATH", help="background image, relative to the campaign dir (maps/x.png)")
+    s.add_argument("--place", action="store_true", help="place tokens for the layout's legend (a = Havoc)")
+    _camp(s)
+
+    s = sub.add_parser("place", help="put a token on a square")
+    s.add_argument("name")
+    s.add_argument("x", type=int)
+    s.add_argument("y", type=int)
+    s.add_argument("--pc", action="store_true", help="a player character (default: NPC/monster)")
+    s.add_argument("--speed", type=int, default=30)
+    s.add_argument("--size", type=int, default=1, help="squares per side (Large = 2)")
+    _camp(s)
+
+    s = sub.add_parser("move", help="move a token, checking walls and speed")
+    s.add_argument("name")
+    s.add_argument("x", type=int)
+    s.add_argument("y", type=int)
+    s.add_argument("--dash", action="store_true", help="Dash: double speed this turn")
+    s.add_argument("--force", action="store_true",
+                   help="forced movement (shove, Push) or a DM ruling: no speed or path check")
+    _camp(s)
+
+    s = sub.add_parser("turn", help="start a creature's turn: its movement is fresh")
+    s.add_argument("name")
+    s.add_argument("--round", type=int, help="also set the round number")
+    _camp(s)
+
+    s = sub.add_parser("dist", help="distance in feet between two tokens")
+    s.add_argument("a")
+    s.add_argument("b")
+    s.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"))
+
+    s = sub.add_parser("hp", help="set a token's hit points for its ring on the map")
+    s.add_argument("name")
+    s.add_argument("hp", metavar="CUR[/MAX]")
+    _camp(s)
+
+    s = sub.add_parser("remove", help="take a token off the map (dead, fled)")
+    s.add_argument("name")
+    _camp(s)
+
+    sub.add_parser("masteries", help="list the 2024 weapon mastery properties")
+
+    s = sub.add_parser("mastery", help="resolve a mastery property without an attack")
+    s.add_argument("property")
+    s.add_argument("--hit", action="store_true")
+    _mastery_args(s, with_name=False)
+    return p
 
 
-def _int_opt(args: list, flag: str):
-    v = _opt(args, flag)
-    return int(v) if v is not None else None
+def _mastery_args(s, with_name: bool = True):
+    if with_name:
+        s.add_argument("--mastery", help="2024 weapon mastery property")
+    s.add_argument("--ability-mod", type=int, default=0)
+    s.add_argument("--prof", type=int)
+    s.add_argument("--target-con-save", type=int)
+    s.add_argument("--topple-dc", type=int)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
+def _campaign_dir(name):
+    if not name:
+        raise SystemExit("combat.py: the battle map needs -c <campaign> (or $CAMPAIGN)")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from paths import find_campaign
+    d = find_campaign(name)
+    if not d.is_dir():
+        raise SystemExit(f"combat.py: no campaign directory {d}")
+    return d
 
-    cmd = sys.argv[1]
 
-    if cmd == "init":
-        combatants = json.loads(sys.argv[2])
-        # Store max_hp
+def push_map(m: dict) -> None:
+    """Send the map to the display (silently nothing when it isn't running)."""
+    import subprocess
+    import battlemap
+    push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
+    try:
+        subprocess.run([sys.executable, push, "--json", json.dumps({"map": battlemap.display_payload(m)})],
+                       capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
+def _map_cmd(a) -> int:
+    import battlemap as bm
+    camp = _campaign_dir(a.campaign)
+    try:
+        if a.cmd == "map" and a.action == "init":
+            legend, markers = {}, {}
+            if a.layout:
+                from utf8io import read_text
+                cells, markers, legend = bm.parse_layout(read_text(pathlib.Path(a.layout)))
+                m = bm.new_map(max(len(r) for r in cells), len(cells), cells, a.image)
+            elif a.size:
+                w, h = (int(v) for v in a.size.lower().split("x"))
+                m = bm.new_map(w, h, image=a.image)
+            else:
+                print("combat.py map init: give --layout FILE or --size WxH", file=sys.stderr)
+                return 2
+            if a.place:
+                for ch, (x, y) in markers.items():
+                    if ch in legend:
+                        name = legend[ch]
+                        bm.place(m, name, x, y, kind="pc" if ch.isupper() else "npc")
+            bm.save(camp, m)
+        elif a.cmd == "map" and a.action == "clear":
+            p = bm.map_path(camp)
+            if p.exists():
+                p.unlink()
+            if not a.no_push:
+                push_map_clear()
+            print("Battle map cleared.")
+            return 0
+        else:
+            m = bm.load(camp)
+        if a.cmd == "place":
+            bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size)
+            bm.save(camp, m)
+            print(f"{a.name} placed at ({a.x},{a.y}).")
+        elif a.cmd == "move":
+            r = bm.move(m, a.name, a.x, a.y, dash=a.dash, force=a.force)
+            bm.save(camp, m)
+            how = "pushed" if a.force else f"{r['cost']} ft, {r['left']} ft left"
+            print(f"{r['name']} {r['from']} → {r['to']} ({how}).")
+        elif a.cmd == "turn":
+            bm.start_turn(m, a.name)
+            if a.round:
+                m["round"] = a.round
+            bm.save(camp, m)
+            print(f"{a.name}'s turn — movement reset.")
+        elif a.cmd == "hp":
+            try:
+                parts = [int(v) for v in a.hp.split("/")]
+            except ValueError:
+                print("combat.py hp: CUR or CUR/MAX, e.g. 4/7", file=sys.stderr)
+                return 2
+            t = bm.set_hp(m, a.name, parts[0], parts[1] if len(parts) > 1 else None)
+            bm.save(camp, m)
+            print(f"{a.name}: {t['hp'][0]}/{t['hp'][1]} HP.")
+        elif a.cmd == "remove":
+            bm.remove(m, a.name)
+            bm.save(camp, m)
+            print(f"{a.name} removed from the map.")
+        elif a.cmd == "dist":
+            n1, t1 = bm.token(m, a.a)
+            n2, t2 = bm.token(m, a.b)
+            print(f"{n1} → {n2}: {bm.distance_ft((t1['x'], t1['y']), (t2['x'], t2['y']))} ft")
+            return 0
+        if a.cmd == "map" and a.action in ("init", "show"):
+            print(bm.render_ascii(m))
+        if not getattr(a, "no_push", True):
+            push_map(m)
+        return 0
+    except bm.MapError as exc:
+        print(f"combat.py {a.cmd}: {exc}", file=sys.stderr)
+        return 2
+
+
+def push_map_clear() -> None:
+    import subprocess
+    push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
+    try:
+        subprocess.run([sys.executable, push, "--json", json.dumps({"map": None})],
+                       capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
+def main(argv=None) -> int:
+    a = build_parser().parse_args(argv)
+
+    if a.cmd in ("map", "place", "move", "turn", "dist", "remove", "hp"):
+        return _map_cmd(a)
+
+    if a.cmd == "init":
+        combatants = json.loads(a.combatants)
         for c in combatants:
             c["max_hp"] = c["hp"]
         ordered = initiative_order(combatants)
@@ -361,69 +581,68 @@ if __name__ == "__main__":
         print()
         print("STATE_JSON:", json.dumps(ordered))
 
-    elif cmd == "tracker":
-        state = json.loads(sys.argv[2])
-        round_num = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-        print_tracker(state, round_num)
+    elif a.cmd == "tracker":
+        print_tracker(json.loads(a.state), a.round)
 
-    elif cmd == "attack":
-        args = sys.argv[2:]
-        atk = int(args[args.index("--atk") + 1])
-        ac = int(args[args.index("--ac") + 1])
-        dmg = args[args.index("--dmg") + 1]
-        crit = "--crit" in args
+    elif a.cmd == "attack":
+        range_note = ""
+        if a.attacker or a.target:
+            if not (a.attacker and a.target):
+                print("combat.py attack: --from and --target go together", file=sys.stderr)
+                return 2
+            import battlemap as bm
+            rng = None
+            if a.rng:
+                try:
+                    parts = [int(v) for v in a.rng.split("/")]
+                    rng = (parts[0], parts[1] if len(parts) > 1 else parts[0])
+                except ValueError:
+                    print("combat.py attack: --range is NORMAL/LONG, e.g. 80/320", file=sys.stderr)
+                    return 2
+            try:
+                chk = bm.attack_range(bm.load(_campaign_dir(a.campaign)), a.attacker, a.target,
+                                      reach=a.reach, rng=rng)
+            except bm.MapError as exc:
+                print(f"combat.py attack: {exc}", file=sys.stderr)
+                return 2
+            if not chk["ok"]:
+                print(f"Out of range: {chk['why']}. No attack rolled.")
+                return 3
+            if chk["disadvantage"]:
+                a.disadvantage = True
+            range_note = f"Range: {chk['distance']} ft" + (f" — disadvantage ({chk['why']})" if chk["why"] else "")
         attack_mods = damage_mods = None
-        if "--effects" in args:
-            who = args[args.index("--effects") + 1]
-            camp = (_opt(args, "-c") or _opt(args, "--campaign")
-                    or os.environ.get("CAMPAIGN"))
-            if not camp:
+        if a.effects:
+            if not a.campaign:
                 print("combat.py: --effects needs -c <campaign>", file=sys.stderr)
-                sys.exit(2)
+                return 2
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             import tracker
-            attack_mods = tracker.active_modifiers(camp, who, "attack")
-            damage_mods = tracker.active_modifiers(camp, who, "damage")
-        result = resolve_attack(atk, ac, dmg, crit,
-                                attack_mods=attack_mods, damage_mods=damage_mods)
-
-        # Optional 2024 weapon mastery
-        if "--mastery" in args:
-            mastery_name = args[args.index("--mastery") + 1]
-            ability_mod = (int(args[args.index("--ability-mod") + 1])
-                           if "--ability-mod" in args else 0)
-            save_dc = (int(args[args.index("--topple-dc") + 1])
-                       if "--topple-dc" in args else None)
-            mastery = apply_mastery(mastery_name, result["hit"],
-                                    ability_mod=ability_mod, save_dc=save_dc,
-                                    prof=_int_opt(args, "--prof"),
-                                    target_save=_int_opt(args, "--target-con-save"))
-            result["mastery"]      = mastery
+            attack_mods = tracker.active_modifiers(a.campaign, a.effects, "attack")
+            damage_mods = tracker.active_modifiers(a.campaign, a.effects, "damage")
+        result = resolve_attack(a.atk, a.ac, a.dmg, a.crit,
+                                attack_mods=attack_mods, damage_mods=damage_mods,
+                                advantage=a.advantage, disadvantage=a.disadvantage)
+        if a.mastery:
+            mastery = apply_mastery(a.mastery, result["hit"], ability_mod=a.ability_mod,
+                                    save_dc=a.topple_dc, prof=a.prof,
+                                    target_save=a.target_con_save)
+            result["mastery"] = mastery
             result["mastery_text"] = mastery["text"]
-
+        if range_note:
+            print(range_note)
         print(format_attack(result))
 
-    elif cmd == "masteries":
+    elif a.cmd == "masteries":
         print(list_masteries())
 
-    elif cmd == "mastery":
-        # Ad-hoc mastery resolution (no attack roll context)
-        args = sys.argv[2:]
-        if not args:
-            print("Usage: combat.py mastery <property> [--hit] [--ability-mod N] "
-                  "[--prof N] [--target-con-save N] [--topple-dc N]")
-            sys.exit(1)
-        prop = args[0]
-        hit  = "--hit" in args
-        ability_mod = (int(args[args.index("--ability-mod") + 1])
-                       if "--ability-mod" in args else 0)
-        save_dc = (int(args[args.index("--topple-dc") + 1])
-                   if "--topple-dc" in args else None)
-        out = apply_mastery(prop, hit=hit, ability_mod=ability_mod,
-                            save_dc=save_dc, prof=_int_opt(args, "--prof"),
-                            target_save=_int_opt(args, "--target-con-save"))
+    elif a.cmd == "mastery":
+        out = apply_mastery(a.property, hit=a.hit, ability_mod=a.ability_mod,
+                            save_dc=a.topple_dc, prof=a.prof,
+                            target_save=a.target_con_save)
         print(json.dumps(out, indent=2))
+    return 0
 
-    else:
-        print(f"Unknown command: {cmd}")
-        sys.exit(1)
+
+if __name__ == "__main__":
+    sys.exit(main())

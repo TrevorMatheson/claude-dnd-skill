@@ -296,22 +296,40 @@ def call_claude(display: str, state: str, session: str, arc: str, graph: str = "
 
     prompt = "\n\n".join(prompt_parts)
 
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", "claude-sonnet-4-6",
-            "--system-prompt", system,
-            prompt,
-        ],
-        capture_output=True,
-        encoding="utf-8", text=True,
-        timeout=60,
-    )
+    cmd = [claude_exe(), "-p"]
+    model = os.environ.get("DND_HELP_MODEL", "").strip()
+    if model:   # otherwise the CLI's own default model — no id here to go stale
+        cmd += ["--model", model]
+    cmd += ["--system-prompt", system, prompt]
+    try:
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", text=True, timeout=90)
+    except FileNotFoundError:
+        raise HelpUnavailable("the `claude` command was not found on this computer's PATH")
+    except subprocess.TimeoutExpired:
+        raise HelpUnavailable("Claude took longer than 90 seconds to answer")
 
     if result.returncode != 0:
-        return "SKIP"
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        raise HelpUnavailable(detail[-1][:200] if detail else f"claude exited {result.returncode}")
 
     return result.stdout.strip()
+
+
+class HelpUnavailable(RuntimeError):
+    """DM Help could not get an answer; the message says why."""
+
+
+def claude_exe() -> str:
+    """The claude CLI. On Windows it is claude.cmd / claude.exe, which a bare
+    "claude" in an argv list does not find."""
+    import shutil
+    return shutil.which("claude") or "claude"
+
+
+def unavailable_text(reason: str) -> str:
+    return ("DM Help unavailable: " + reason.rstrip(".") + ". "
+            "Check that the `claude` command works in a terminal and is signed in "
+            "(run `claude`, then /login).")
 
 
 def send_tutor(text: str) -> None:
@@ -338,7 +356,12 @@ def main() -> None:
         if not display and not state and not session:
             return
 
-        hint = call_claude(display, state, session, arc, graph)
+        try:
+            hint = call_claude(display, state, session, arc, graph)
+        except HelpUnavailable as exc:
+            # Used to return "SKIP" here, so the button looked broken.
+            send_tutor(unavailable_text(str(exc)))
+            return
         if hint.strip().upper() == "SKIP":
             return
 

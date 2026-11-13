@@ -204,7 +204,25 @@ def srd_path(ruleset=None):
     if rs not in VALID_RULESETS:
         rs = DEFAULT_RULESET
     fname = "dnd5e_srd_2024.json" if rs == "2024" else "dnd5e_srd.json"
-    return data_dir() / fname
+    return dataset_file(fname)
+
+
+def built_data_dir() -> pathlib.Path:
+    """Where datasets built on this machine live: <data root>/data.
+
+    The plugin's own data/ directory is replaced on every reinstall or
+    /plugin update, so a dataset built there (the 2024 SRD) silently
+    disappeared. Built datasets go here instead."""
+    return _root() / "data"
+
+
+def dataset_file(name: str) -> pathlib.Path:
+    """A dataset by file name: the locally built copy if there is one,
+    otherwise the copy bundled with the plugin (which may not exist)."""
+    built = built_data_dir() / name
+    if built.exists():
+        return built
+    return data_dir() / name
 
 
 # ── CLI passthrough ───────────────────────────────────────────────────────

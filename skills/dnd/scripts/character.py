@@ -761,6 +761,21 @@ if __name__ == "__main__":
     cmd = sys.argv[1]
     args = sys.argv[2:]
 
+    _RULESET = {"--ruleset", "-c", "--campaign"}
+    _KNOWN = {
+        "calc": {"--armor", "--background", "--background-asi", "--class", "--fighting-style",
+                 "--level", "--race", "--shield", "--subrace", "--proficient"} | _RULESET,
+        "levelup": {"--class", "--con-mod", "--con-mod-before", "--from", "--hp-roll",
+                    "--subclass"} | _RULESET,
+        "hitdie": {"--con-mod", "--count", "--die", "--hp", "--max-hp", "--remaining"} | _RULESET,
+        "rest": {"--exhaustion", "--hd-remaining", "--hp", "--level", "--max-hp"} | _RULESET,
+        "xp": {"--gained", "--level"},
+    }
+    if cmd in _KNOWN:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from cli_strict import reject_unknown
+        reject_unknown(args, _KNOWN[cmd], f"character.py {cmd}")
+
     if cmd == "calc":
         do_calc(args)
     elif cmd == "levelup":
