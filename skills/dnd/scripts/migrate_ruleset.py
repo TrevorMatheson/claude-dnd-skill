@@ -43,7 +43,7 @@ from paths import (  # noqa: E402
     campaign_ruleset,
     find_campaign,
 )
-from utf8io import read_text, TextDecodeError  # noqa: E402
+from utf8io import read_text, TextDecodeError, write_text as write_keep_eol  # noqa: E402
 
 # Windows UTF-8 fix: default piped stdout is cp936/GBK, which mangles Chinese
 try:
@@ -155,7 +155,7 @@ def cmd_migrate(campaign: str, ruleset: str, assume_yes: bool) -> int:
 
     bak = _backup(state)
     new_text = _inject_ruleset(text, ruleset)
-    state.write_text(new_text, encoding="utf-8")
+    write_keep_eol(state, new_text)
     print(
         f"[migrate_ruleset] OK — '{campaign}' stamped as ruleset {ruleset}.\n"
         f"  Backup: {bak}\n"

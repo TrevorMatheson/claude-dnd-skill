@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 
-from utf8io import read_text, TextDecodeError
+from utf8io import read_text, TextDecodeError, write_text as write_keep_eol
 
 from paths import _root, campaigns_dir, characters_dir
 
@@ -92,7 +92,7 @@ def _set_unix(target: pathlib.Path) -> None:
     else:
         sep = "" if existing.endswith("\n") or not existing else "\n"
         new_text = f"{existing}{sep}{line}\n"
-    rc.write_text(new_text, encoding="utf-8")
+    write_keep_eol(rc, new_text)
     print(f"Set DND_CAMPAIGN_ROOT={target}")
     print(f"Persisted to {rc}")
     print(f'Run: export DND_CAMPAIGN_ROOT="{target}"  (or open a new shell)')
@@ -136,7 +136,7 @@ def _reset_unix() -> None:
         return
     cleaned = EXPORT_RE.sub("", text)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    rc.write_text(cleaned, encoding="utf-8")
+    write_keep_eol(rc, cleaned)
     print(f"Removed DND_CAMPAIGN_ROOT from {rc}.")
     print("Run: unset DND_CAMPAIGN_ROOT  (or open a new shell)")
 

@@ -45,7 +45,7 @@ import sys
 import script_ranges
 from paths import find_campaign, characters_dir, _root
 from name_registry import slug, all_taken_slugs, add as registry_add, retire as registry_retire
-from utf8io import read_text, TextDecodeError
+from utf8io import read_text, TextDecodeError, write_text as write_keep_eol
 
 # Windows UTF-8 fix: default piped stdout is cp936/GBK, which mangles Chinese
 try:
@@ -245,7 +245,7 @@ def apply_text_rename(path: pathlib.Path, old: str, new: str) -> int:
         total += n
 
     if total > 0:
-        path.write_text(text, encoding="utf-8")
+        write_keep_eol(path, text)
     return total
 
 
@@ -284,8 +284,7 @@ def apply_graph_rename(graph_path: pathlib.Path, old: str, new: str) -> bool:
             if edge.get(k) in id_remap:
                 edge[k] = id_remap[edge[k]]
     if renamed:
-        graph_path.write_text(json.dumps(data, indent=2, ensure_ascii=False),
-                              encoding="utf-8")
+        write_keep_eol(graph_path, json.dumps(data, indent=2, ensure_ascii=False))
     return renamed
 
 
@@ -308,7 +307,7 @@ def add_archive_audit_note(camp_dir: pathlib.Path, old: str, new: str,
     if note.split(": ", 1)[1].split(" at S")[0] in text:
         # Already noted — don't double-note
         return False
-    archive.write_text(note + text, encoding="utf-8")
+    write_keep_eol(archive, note + text)
     return True
 
 
