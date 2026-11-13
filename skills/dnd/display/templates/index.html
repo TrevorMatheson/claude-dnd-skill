@@ -2347,6 +2347,17 @@
     50%  { filter: blur(1.2px); }
     100% { filter: blur(0.4px); }
   }
+  #dp-phys-row { gap: 8px; }
+  #dp-phys {
+    flex: 1; min-width: 0; font-size: 18px; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid rgba(201, 168, 76, 0.35); background: rgba(0, 0, 0, 0.25); color: inherit;
+  }
+  #dp-phys-send {
+    padding: 10px 16px; border-radius: 10px; font-size: 16px; cursor: pointer;
+    border: 1px solid rgba(201, 168, 76, 0.55); background: rgba(201, 168, 76, 0.12); color: inherit;
+  }
+  #dp-phys-send:disabled { opacity: 0.5; }
+  #dp-phys-hint { font-size: 12px; opacity: 0.6; text-align: center; margin-top: -4px; }
   #dp-result-line {
     text-align: center;
     color: #b8a26a;
@@ -3811,6 +3822,16 @@
       <div class="dp-row">
         <button id="dp-roll">Roll</button>
       </div>
+      <!-- Physical dice: the player rolled a real die and types the face it
+           shows. The server adds the modifier, so "14" is never ambiguous
+           between the face and the total. -->
+      <div class="dp-row" id="dp-phys-row">
+        <input id="dp-phys" type="text" inputmode="numeric" maxlength="7"
+               placeholder="Rolled it myself: face" autocomplete="off"
+               aria-label="Face shown on your physical die">
+        <button id="dp-phys-send" type="button">Enter</button>
+      </div>
+      <div id="dp-phys-hint">Type the number on the die, not the total. With advantage, type both dice (e.g. 7 16).</div>
     </div>
     <!-- Phone-only character sheet pane (Sheet tab) -->
     <div id="character-pane" data-tab-section="character">
@@ -8296,6 +8317,22 @@ function _updateDicePendingBadge(snapshot) {
 }
 
 // ── Phone dice pad: server-side roll + slot-machine reveal ───────────────
+// "Stealth: d20 + 3, need 13 or more · with a real die, type the face — +3 is added for you"
+// Every prescribed roll says the die, the bonus, the target and what to type.
+function _rollPrompt(req) {
+  const spec  = String(req.spec || '1d20').toLowerCase();
+  const die   = spec.replace(/^1d/, 'd');
+  const modN  = Number(req.modifier) || 0;
+  const modS  = modN ? ` ${modN > 0 ? '+' : '−'} ${Math.abs(modN)}` : '';
+  const advS  = req.advantage === 'advantage' ? ' with advantage (roll 2, keep higher)'
+              : req.advantage === 'disadvantage' ? ' with disadvantage (roll 2, keep lower)' : '';
+  const label = String(req.label || '').trim();
+  const dcS   = (req.dc != null) ? `, need ${req.dc} or more` : '';
+  const face  = modN ? ` · real die: type the face, ${modN > 0 ? '+' : '−'}${Math.abs(modN)} is added for you`
+                     : ' · real die: type the face';
+  return `${label ? label + ': ' : ''}${die}${modS}${advS}${dcS}${face}`;
+}
+
 function _initDicePad() {
   const reel    = document.getElementById('dp-reel');
   const rollBtn = document.getElementById('dp-roll');
@@ -8402,19 +8439,25 @@ function _initDicePad() {
     reel.classList.add('locked');
   }
 
-  rollBtn.addEventListener('click', async () => {
+  const physIn   = document.getElementById('dp-phys');
+  const physSend = document.getElementById('dp-phys-send');
+
+  // physicalFaces: null for a virtual roll, or the faces typed from a real die.
+  async function _doRoll(physicalFaces) {
     const character = (nameEl.value || '').trim() || 'Player';
     const label     = (labelEl.value || '').trim();
     rollBtn.disabled = true;
+    if (physSend) physSend.disabled = true;
     document.getElementById('dp-result-line').textContent = '';
 
     const m = /^(\d+)d(\d+)$/.exec(spec);
     const faces = m ? Number(m[2]) : 20;
 
     // Kick off spin animation immediately so the phone feels responsive,
-    // then await the authoritative server roll.
-    const spinPromise = spin(faces);
+    // then await the authoritative server roll. A physical roll has no spin.
+    const spinPromise = physicalFaces ? Promise.resolve() : spin(faces);
     let result = null;
+    let errText = 'roll failed';
     try {
       const res = await fetch('/player-input/dice', {
         method: 'POST',
@@ -8422,16 +8465,19 @@ function _initDicePad() {
         body: JSON.stringify({
           character, spec, modifier: mod, advantage: adv, label,
           request_id: _activeRequestId || undefined,
+          faces: physicalFaces || undefined,
         }),
       });
       if (res.ok) result = await res.json();
+      else { try { errText = (await res.json()).error || errText; } catch (_) {} }
     } catch (_) { /* network error — fall through */ }
 
     await spinPromise;
+    if (physSend) physSend.disabled = false;
     if (!result) {
       reel.classList.remove('spinning');
       reel.textContent = '!';
-      document.getElementById('dp-result-line').textContent = 'roll failed';
+      document.getElementById('dp-result-line').textContent = errText;
       rollBtn.disabled = false;
       rollBtn.classList.remove('pulse');
       if (_locked) _setLocked(false);
@@ -8460,9 +8506,11 @@ function _initDicePad() {
     // afterwards so the player can't fire another unsolicited roll. The lock
     // is released only by the next dice_request arriving for this character
     // (which unlocks + re-pre-fills inside _applyDiceRequest).
+    if (physIn) physIn.value = '';
     if (_activeRequestId) {
       _setLocked(true, spec, adv);          // keep die / adv selections frozen
       rollBtn.disabled = true;              // and disable Roll itself
+      if (physSend) physSend.disabled = true;
       rollBtn.classList.add('rolled');
       if (boundEl) {
         let done = boundEl.querySelector('.req');
@@ -8475,7 +8523,26 @@ function _initDicePad() {
       rollBtn.disabled = false;
       if (_locked) _setLocked(false);
     }
-  });
+  }
+
+  rollBtn.addEventListener('click', () => _doRoll(null));
+
+  function _sendPhysical() {
+    const nums = (physIn.value.match(/\d+/g) || []).map(Number);
+    const m = /^(\d+)d(\d+)$/.exec(spec);
+    const sides = m ? Number(m[2]) : 20;
+    const want = (spec === '1d20' && adv !== 'normal') ? [1, 2] : [m ? Number(m[1]) : 1];
+    const line = document.getElementById('dp-result-line');
+    if (!nums.length || !want.includes(nums.length) || nums.some(n => n < 1 || n > sides)) {
+      line.textContent = want.length > 1
+        ? `type the d20 you kept, or both dice (1–${sides})`
+        : `type ${want[0] > 1 ? want[0] + ' faces' : 'the face'} (1–${sides})`;
+      return;
+    }
+    _doRoll(nums);
+  }
+  if (physSend) physSend.addEventListener('click', _sendPhysical);
+  if (physIn) physIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); _sendPhysical(); } });
 
   // Lock the pad to a single prescribed roll. Only the matching die / adv
   // button and the Roll button remain interactive. Cleared after the roll
@@ -8532,14 +8599,13 @@ function _initDicePad() {
     const baseLabel = (req.label || '').trim();
     labelEl.value = baseLabel;
     if (boundEl) {
-      const dcStr = (req.dc != null) ? ` · DC ${req.dc}` : '';
-      const desc  = baseLabel || (reqSpec === '1d20' ? 'Roll d20' : `Roll ${reqSpec}`);
       let r = boundEl.querySelector('.req');
       if (!r) { r = document.createElement('span'); r.className = 'req'; boundEl.appendChild(r); }
-      r.textContent = `↻ ${desc}${dcStr}`;
+      r.textContent = `↻ ${_rollPrompt(req)}`;
     }
 
     rollBtn.disabled = false;                 // re-enable after a previous "rolled" lock
+    if (physSend) physSend.disabled = false;
     rollBtn.classList.remove('rolled');
     rollBtn.classList.add('pulse');
     if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
