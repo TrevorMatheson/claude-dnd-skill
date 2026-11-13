@@ -7509,7 +7509,7 @@ function _renderQueueStatus(chars) {
 // ── Battle map panel ───────────────────────────────────────────────
 // Drawn from stats.map (combat.py map/place/move push it). Tokens slide to
 // their new square; a phone opened with ?char=<name> highlights its own token.
-const _bmState = { map: null, mine: '', current: '', players: {} };
+const _bmState = { map: null, mine: '', current: '', players: {}, round: null };
 (function () {
   try {
     const qp = new URLSearchParams(location.search);
@@ -7577,7 +7577,9 @@ function _bmRender() {
   const panel = _bmEnsurePanel();
   if (!m) { panel.hidden = true; return; }
   panel.hidden = false;
-  panel.querySelector('.bm-round').textContent = 'Round ' + (m.round || 1);
+  // The turn order's round (send.py --turn "round", push_stats --turn-round)
+  // wins over the round stored with the map.
+  panel.querySelector('.bm-round').textContent = 'Round ' + (_bmState.round || m.round || 1);
   if (panel.classList.contains('bm-collapsed')) return;
   const stage = panel.querySelector('.bm-stage');
   const board = panel.querySelector('.bm-board');
@@ -7657,6 +7659,7 @@ function _bmUpdate(stats) {
   }
   if (stats.turn_order !== undefined) {
     _bmState.current = (stats.turn_order && stats.turn_order.current || '').toLowerCase();
+    _bmState.round = (stats.turn_order && stats.turn_order.round) || null;
   }
   if (stats.map !== undefined) _bmState.map = stats.map;
   if (stats.map !== undefined || stats.turn_order !== undefined) _bmRender();

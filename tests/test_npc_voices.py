@@ -126,6 +126,10 @@ class TestPageWiring(unittest.TestCase):
         m = re.search(r"function _ttsAutoEnqueue\(btn, blockEl\) \{(.*?)\n\}", self.src, re.S)
         self.assertIn("_ttsPrefetchBlock(blockEl)", m.group(1))
 
+    def test_map_round_follows_turn_order(self):
+        # Found in the walkthrough: the sidebar said Round 2, the map Round 1.
+        self.assertIn("(_bmState.round || m.round || 1)", self.src)
+
     def test_block_voice_used_for_tts(self):
         self.assertIn("_ttsFetchPcm(text, _ttsBlockVoice(blockEl))", self.src)
 
