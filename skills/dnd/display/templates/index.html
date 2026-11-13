@@ -4947,6 +4947,13 @@ function _flushForBlock() {
     currentCursor.classList.remove('typing-cursor');
     currentCursor = null;
   }
+  // The narration block being closed here gets its badge and play bar, as
+  // flushNewBlock gives it. Without this, narration followed by an NPC, dice
+  // or hint block (every send.py --turn) was never read aloud.
+  if (currentEl) {
+    _addBlockBadge(currentEl);
+    _addTtsBar(currentEl);
+  }
   currentEl = null;
   clearTimeout(idleTimer);
 }
@@ -6798,7 +6805,10 @@ function _ttsBtnBusy(btn) {
 
 function _ttsAutoEnqueue(btn, blockEl) {
   _ttsAutoQueue.push([btn, blockEl]);
-  if (!_ttsAutoBusy) _ttsAutoNext();
+  if (!_ttsAutoBusy) { _ttsAutoNext(); return; }
+  // Something is already playing: this block is next in line, so start
+  // fetching its audio now (blocks of one turn arrive a few seconds apart).
+  if (_ttsAutoQueue.length === 1 && typeof _ttsPrefetchBlock === 'function') _ttsPrefetchBlock(blockEl);
 }
 
 async function _ttsAutoNext() {
@@ -6845,8 +6855,9 @@ function _ttsPrefetchBlock(blockEl) {
 
 function _ttsExtractText(blockEl) {
   const clone = blockEl.cloneNode(true);
-  const bar = clone.querySelector('.tts-bar');
-  if (bar) bar.remove();
+  // Only the spoken words: not the play bar, the NPC's name label (read as
+  // "MiraOne down…"), the hint header or the kind badge.
+  clone.querySelectorAll('.tts-bar, .npc-name, .tutor-header, .block-badge').forEach(n => n.remove());
   return (clone.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
 }
 

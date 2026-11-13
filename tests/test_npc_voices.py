@@ -96,8 +96,10 @@ class TestPageWiring(unittest.TestCase):
 
     def test_replay_sites_never_auto_play(self):
         calls = re.findall(r"_addTtsBar\(([^)]*)\)", self.src)
-        bare = [c for c in calls if c.strip() in ("block", "currentEl")]
-        self.assertEqual(len(bare), 1, f"only the live DM stream may call _addTtsBar without opts: {calls}")
+        # Only the live DM stream (currentEl, closed by flushNewBlock or
+        # _flushForBlock) may call _addTtsBar without the replay option.
+        bare = [c for c in calls if "," not in c and c.strip() != "blockEl"]
+        self.assertEqual(sorted(set(bare)), ["currentEl"], f"calls: {calls}")
         self.assertIn("if (_ttsAutoNarrate && !isReplay)", self.src)
 
     def test_voice_reaches_deferred_renderers(self):
@@ -107,6 +109,22 @@ class TestPageWiring(unittest.TestCase):
         self.assertIn("function _renderNPCBlockNow(name, text, isReplay, voice)", self.src)
         self.assertIn("_renderTutorBlockNow(text, isReplay, voice)", self.src)
         self.assertIn("function _renderTutorBlockNow(text, isReplay, voice)", self.src)
+
+    def test_narration_before_another_block_gets_a_play_bar(self):
+        # Found in the walkthrough: _flushForBlock closed the narration block
+        # without a play bar, so a --turn's narration was never read aloud.
+        m = re.search(r"function _flushForBlock\(\) \{(.*?)\n\}", self.src, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn("_addTtsBar(currentEl)", m.group(1))
+
+    def test_speech_text_skips_labels(self):
+        m = re.search(r"function _ttsExtractText\(blockEl\) \{(.*?)\n\}", self.src, re.S)
+        self.assertIn(".npc-name", m.group(1))
+        self.assertIn(".tutor-header", m.group(1))
+
+    def test_block_queued_behind_playing_one_is_prefetched(self):
+        m = re.search(r"function _ttsAutoEnqueue\(btn, blockEl\) \{(.*?)\n\}", self.src, re.S)
+        self.assertIn("_ttsPrefetchBlock(blockEl)", m.group(1))
 
     def test_block_voice_used_for_tts(self):
         self.assertIn("_ttsFetchPcm(text, _ttsBlockVoice(blockEl))", self.src)
