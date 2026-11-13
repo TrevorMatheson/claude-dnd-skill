@@ -46,7 +46,7 @@ try:
 except FileNotFoundError:
     _SCHEME = "http"
 _BASE       = (os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/")
-               or f"{_SCHEME}://localhost:5001")
+               or f"{_SCHEME}://127.0.0.1:5001")   # not localhost: ~2 s IPv6 detour on Windows
 _DICE_REQ   = f"{_BASE}/dice-request"
 _TEXT_LOG   = os.path.join(str(_runtime_dir()), "text_log.json")
 

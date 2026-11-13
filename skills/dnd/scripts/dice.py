@@ -145,7 +145,7 @@ def format_modifier(mod):
 # --------------------------------------------------------------------------
 
 _PORT = int(os.environ.get("DND_DICE_PORT", "7777"))
-_BASE = f"http://localhost:{_PORT}"
+_BASE = f"http://127.0.0.1:{_PORT}"   # not localhost: ~2 s IPv6 detour on Windows
 
 
 def _server_alive(timeout=0.5) -> bool:

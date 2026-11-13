@@ -100,6 +100,10 @@ def lan_ip() -> str | None:
 
 
 def _ping(base: str, timeout: float = 1.0) -> bool:
+    sys.path.insert(0, HERE)
+    from display_url import display_up
+    if not display_up(base, cached=False):
+        return False
     try:
         urllib.request.urlopen(f"{base}/ping", timeout=timeout)
         return True
@@ -158,10 +162,11 @@ def start(lan: bool) -> int:
                             env=env, cwd=HERE, **kw)
     with open(PID_FILE, "w", encoding="utf-8") as f:
         f.write(str(proc.pid))
-    local = f"http://localhost:{PORT}"
-    for _ in range(30):
-        time.sleep(0.5)
-        if _ping(local):
+    local = f"http://localhost:{PORT}"           # shown to people; browsers handle it
+    probe = f"http://127.0.0.1:{PORT}"           # scripts: no IPv6 detour
+    for _ in range(60):
+        time.sleep(0.25)
+        if _ping(probe):
             break
         if proc.poll() is not None:
             print(f"The display stopped right away. Last lines of {LOG_FILE}:")
@@ -188,7 +193,7 @@ def start(lan: bool) -> int:
 
 
 def status() -> int:
-    up = _ping(f"http://localhost:{PORT}")
+    up = _ping(f"http://127.0.0.1:{PORT}")
     print(f"Display: {'running' if up else 'not running'} (localhost:{PORT})")
     if up:
         ip = lan_ip()

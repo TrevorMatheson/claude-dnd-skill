@@ -90,8 +90,8 @@ if _DISPLAY_DIR not in sys.path:
 from runtime_paths import rt          # writable runtime dir (update-safe)
 _SCHEME_FILE = os.path.join(_DISPLAY_DIR, ".scheme")   # launch marker → code dir
 _SCHEME = open(_SCHEME_FILE, encoding="utf-8").read().strip() if os.path.exists(_SCHEME_FILE) else "http"
-FLASK_URL  = (os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/")
-              or f"{_SCHEME}://localhost:5001") + "/stats"
+from display_url import base_url as _base_url, display_up as _display_up
+FLASK_URL  = _base_url() + "/stats"   # 127.0.0.1, not localhost: see display_url.py
 TOKEN_FILE = rt(".token")
 TIMEOUT    = 2.0
 
@@ -116,6 +116,8 @@ def _send(url: str, data: bytes, token: str) -> None:
     if token:
         headers["X-DND-Token"] = token
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    if not _display_up(url):
+        return  # Display not running — return at once, not after ~4 s
     try:
         urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
     except Exception:

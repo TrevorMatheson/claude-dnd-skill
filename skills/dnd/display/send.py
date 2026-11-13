@@ -76,8 +76,8 @@ if _DISPLAY_DIR not in sys.path:
 from runtime_paths import rt          # writable runtime dir (update-safe)
 _SCHEME_FILE = os.path.join(_DISPLAY_DIR, ".scheme")   # launch marker → code dir
 _SCHEME = open(_SCHEME_FILE, encoding="utf-8").read().strip() if os.path.exists(_SCHEME_FILE) else "http"
-BASE_URL    = (os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/")
-               or f"{_SCHEME}://localhost:5001")
+from display_url import base_url as _base_url, display_up as _display_up
+BASE_URL    = _base_url()      # 127.0.0.1, not localhost: see display_url.py
 FLASK_URL   = f"{BASE_URL}/chunk"
 STATS_URL   = f"{BASE_URL}/stats"
 HEALTH_URL  = f"{BASE_URL}/health"
@@ -130,6 +130,10 @@ def _post(url: str, data: bytes, token: str) -> bool:
     attempts = RETRIES + 1
     last_err: "Exception | None" = None
     label = _endpoint_label(url)
+    if not _display_up(url):
+        # Nothing listening: say so now instead of after ~2 s per attempt.
+        _SEND_LOG.append({"endpoint": label, "ok": False, "reason": "display offline", "size": len(data)})
+        return False
     for i in range(attempts):
         try:
             resp = urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
@@ -438,6 +442,10 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
     Prints the request id first (callers correlate on it), then, with `wait`,
     one line per roll (or JSON). Returns 0, 1 on a failed POST, 2 on timeout.
     """
+    if not _display_up(DICE_REQ_URL):
+        print("send.py: dice-request failed: display offline — call for the roll out loud",
+              file=sys.stderr)
+        return 1
     body = {"characters": chars, "spec": spec, "modifier": modifier, "advantage": advantage}
     if label:
         body["label"] = label
