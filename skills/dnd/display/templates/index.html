@@ -3768,8 +3768,8 @@
     <span class="audio-label">Auto Narrate</span>
     <span id="narrate-label" class="narrate-label">Off</span>
   </div>
-  <div class="audio-row" id="readall-row" title="Also read dice lines and DM hints aloud (this browser only)" hidden>
-    <span class="audio-label">Read dice &amp; hints</span>
+  <div class="audio-row" id="readall-row" title="Also read DM hints aloud (this browser only)" hidden>
+    <span class="audio-label">Read hints aloud</span>
     <span id="readall-label" class="narrate-label">Off</span>
   </div>
   <div class="audio-row" id="theme-row" title="Display theme — Dark / Light / Auto (system)">
@@ -4749,17 +4749,50 @@ function getOrCreateBlock() {
   return currentEl.querySelector('p:last-child');
 }
 
-function typeNextChar() {
+// The typewriter runs once per animation frame and writes every character
+// that is due since the last frame. It used to write one character per
+// setTimeout, each time adding a new text node, removing and re-adding the
+// cursor (which restarted its blink and could bounce the last word between
+// lines) and scrolling. At ~28 characters a second that was a layout pass for
+// every character, and the text visibly shook on the TV and on phones.
+let _typeRaf = 0;
+let _typeLast = 0;
+let _typeOwed = 0;
+
+function typeNextChar(now) {
+  _typeRaf = 0;
   if (charQueue.length === 0) {
     isTyping = false;
     return;
   }
+  if (charDelay === 0) { isTyping = false; instantFlush(); scrollToBottom(); return; }
 
-  const item = charQueue.shift();
-  const p    = getOrCreateBlock();
+  now = now || performance.now();
+  // Characters due since the last frame; a hidden tab that wakes up after a
+  // long pause catches up in one go rather than typing for minutes.
+  _typeOwed += Math.min(now - (_typeLast || now - charDelay), 2000) / charDelay;
+  _typeLast = now;
+  let n = Math.floor(_typeOwed);
+  if (n < 1) { _typeRaf = requestAnimationFrame(typeNextChar); return; }
+  _typeOwed -= n;
 
-  if (currentCursor) currentCursor.classList.remove('typing-cursor');
+  const prevCursor = currentCursor;
+  while (n-- > 0 && charQueue.length) _typeOneItem(charQueue.shift());
 
+  const nextCursor = currentEl ? currentEl.querySelector('p:last-child') : null;
+  if (nextCursor !== prevCursor) {
+    if (prevCursor) prevCursor.classList.remove('typing-cursor');
+    if (nextCursor) nextCursor.classList.add('typing-cursor');
+  }
+  currentCursor = nextCursor;
+
+  scrollToBottom();
+  if (charQueue.length) _typeRaf = requestAnimationFrame(typeNextChar);
+  else isTyping = false;
+}
+
+function _typeOneItem(item) {
+  const p = getOrCreateBlock();
   if (item === '\n') {
     // New paragraph — reset inline state
     _currentInlineEl = null;
@@ -4778,22 +4811,20 @@ function typeNextChar() {
     _currentInlineEl = null;
   } else {
     // Plain character — append to inline element if open, else to paragraph
+    // Grow the text node already there instead of adding one per character.
     const target = _currentInlineEl || p;
-    target.appendChild(document.createTextNode(item));
+    const last = target.lastChild;
+    if (last && last.nodeType === 3) last.appendData(item);
+    else target.appendChild(document.createTextNode(item));
   }
-
-  currentCursor = currentEl.querySelector('p:last-child');
-  if (currentCursor) currentCursor.classList.add('typing-cursor');
-
-  scrollToBottom();
-  setTimeout(typeNextChar, charDelay);
 }
 
 function startTyping() {
-  if (isTyping) return;
+  if (isTyping || _typeRaf) return;
   if (charDelay === 0) { instantFlush(); return; }
   isTyping = true;
-  typeNextChar();
+  _typeLast = 0; _typeOwed = 0;   // the first frame writes one character, not the idle time
+  _typeRaf = requestAnimationFrame(typeNextChar);
 }
 
 // ── Block type badge detection ───────────────────────────────────────────────
@@ -4957,6 +4988,7 @@ function flushNewBlock() {
 function instantFlush() {
   if (charQueue.length === 0) return;
   clearTimeout(idleTimer);
+  if (_typeRaf) { cancelAnimationFrame(_typeRaf); _typeRaf = 0; }
   const pending = charQueue.splice(0);  // atomically drain
   let flushInline = null;  // local inline tracker for this flush pass
   for (const item of pending) {
@@ -4979,7 +5011,9 @@ function instantFlush() {
     } else {
       const p = getOrCreateBlock();
       const target = flushInline || p;
-      target.appendChild(document.createTextNode(item));
+      const last = target.lastChild;
+      if (last && last.nodeType === 3) last.appendData(item);
+      else target.appendChild(document.createTextNode(item));
     }
   }
   isTyping = false;
@@ -5255,7 +5289,8 @@ function _renderDiceBlockNow(text, isReplay) {
     else if (hasFumble) triggerFlash('fumble');
   }
 
-  if (_ttsReadAll) _addTtsBar(block, { replay: !!isReplay });
+  // Rolls are shown, never spoken: hearing "d20 plus 5, 17" after the DM has
+  // already narrated the hit adds nothing and holds up the next line.
   textContent.appendChild(block);
   _reanchorCursor();
 }
@@ -5455,6 +5490,7 @@ function clearDisplay(then) {
     // Abort any in-progress typewriter
     charQueue        = [];
     isTyping         = false;
+    if (_typeRaf) { cancelAnimationFrame(_typeRaf); _typeRaf = 0; }
     _currentInlineEl = null;
     if (currentCursor && currentCursor.parentNode) {
       currentCursor.parentNode.removeChild(currentCursor);
@@ -6930,8 +6966,22 @@ function _ttsExtractText(blockEl) {
   const clone = blockEl.cloneNode(true);
   // Only the spoken words: not the play bar, the NPC's name label (read as
   // "MiraOne down…"), the hint header or the kind badge.
-  clone.querySelectorAll('.tts-bar, .npc-name, .tutor-header, .block-badge').forEach(n => n.remove());
-  return (clone.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+  clone.querySelectorAll('.tts-bar, .npc-name, .tutor-header, .block-badge, .dice-block, .dice-result').forEach(n => n.remove());
+  // A paragraph that is only a roll line ("🎲 Stealth 1d20+4 = 15") goes entirely.
+  clone.querySelectorAll('p').forEach(p => { if (/^\s*🎲/.test(p.textContent || '')) p.remove(); });
+  return _ttsStripRolls(clone.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+}
+
+// Roll mechanics the DM writes inline ("(d20+5 = 17)", "🎲 1d8+3 → 9",
+// "[Attack: 18 vs AC 15]") are for the screen; the voice reads only the story.
+function _ttsStripRolls(text) {
+  const ASIDE = /[(\[][^)\]\n]*(?:\b\d*d(?:4|6|8|10|12|20|100)\b|\bvs\.?\s*(?:AC|DC)\b|\bnat(?:ural)?\s*(?:1|20)\b)[^)\]\n]*[)\]]/gi;
+  const BARE  = /(?:🎲\s*)?\b\d*d(?:4|6|8|10|12|20|100)\b(?:\s*[+\-−]\s*\d+)*\s*(?:=|→|->|:)\s*\*{0,2}\d+\*{0,2}/gi;
+  return text
+    .replace(ASIDE, '')     // "(d20+5 = 17)", "[Attack: 18 vs AC 15]", "(nat 20!)"
+    .replace(BARE, '')      // "1d8+3 = 9", "🎲 d20 + 5 → 17"
+    .replace(/🎲/g, '')
+    .replace(/\s+([,.;:!?])/g, '$1');
 }
 
 async function _ttsPlayBlock(btn, blockEl) {
@@ -7125,7 +7175,7 @@ function _ttsShowAudioGate() {
   ctx.resume().then(() => { if (ctx.state === 'running') b.remove(); }).catch(() => {});
 }
 
-// Read-everything row — dice lines and tutor hints get a play bar too.
+// Read-hints row — tutor hints get a play bar too. Dice never do.
 if (_TTS_AVAILABLE) {
   const raRow = document.getElementById('readall-row');
   const raLabel = document.getElementById('readall-label');

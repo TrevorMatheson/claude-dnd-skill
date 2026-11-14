@@ -22,6 +22,8 @@ From the first live table test (see `docs/ROADMAP.md`).
 - The 2024 dataset builds into the data root (survives reinstalls) and fails loudly without PyYAML.
 
 **Narration**
+- Rolls are shown, never spoken: dice blocks no longer get a play bar (the setting is now "Read hints aloud"), and roll mechanics written inline in narration, such as "(d20+5 = 17)" or "[18 vs AC 15]", are left out of the voice.
+- The typewriter writes once per frame instead of once per character, keeps one text node per run and moves the cursor only when the paragraph changes, so text no longer shakes on the TV or phones while it types.
 - `send.py --turn` sends a whole DM turn in one call, in order.
 - The player whose turn it is can Send alone; nobody else has to press skip.
 - Physical dice: type the face on the phone or TV roller; roll prompts name the die, bonus and target.
