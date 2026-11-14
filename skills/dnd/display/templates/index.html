@@ -636,6 +636,36 @@
   }
   #sidebar::-webkit-scrollbar { display: none; }
 
+  /* ── Right-hand party column ──
+     Players pushed with "side": "right" sit here instead of the left sidebar
+     (e.g. two players on each side of a couch). It mirrors #sidebar, and only
+     appears once a right-side player exists; the settings column and the
+     narration's right margin move inward to make room. */
+  #sidebar-right {
+    position: fixed;
+    right: 0;
+    top: 60px;
+    bottom: 28px;
+    width: 210px;
+    z-index: 6;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    background: linear-gradient(to left, rgba(0,0,0,0.6) 70%, transparent);
+    border-left: 1px solid rgba(180,140,60,0.15);
+    padding: 54px 28px 16px 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.7s ease, transform 0.4s ease;
+  }
+  #sidebar-right.has-data { opacity: 1; pointer-events: auto; }
+  #sidebar-right.hidden { transform: translateX(210px); opacity: 0; pointer-events: none; }
+  #sidebar-right::-webkit-scrollbar { display: none; }
+  body.has-right-party:not(.input-only) #audio-controls { right: 248px; }
+  body.has-right-party:not(.input-only) #text-scroll { padding-right: calc(max(340px, 18vw) + 220px); }
+  body.has-right-party:not(.input-only) #text-scroll.controls-hidden { padding-right: 250px; }
+  body.has-right-party:not(.input-only) #text-scroll.sidebar-hidden { padding-right: 120px; }
+
   /* ── Player card ── */
   .sb-player {
     margin-bottom: 14px;
@@ -1983,6 +2013,7 @@
   /* ── Input-only view (mobile players): http://...:5001/?view=input ── */
   body.input-only #text-scroll,
   body.input-only #sidebar,
+  body.input-only #sidebar-right,
   body.input-only #sidebar-toggle,
   body.input-only #world-clock,
   body.input-only #ruleset-badge,
@@ -2399,6 +2430,7 @@
      below ~600 px. Release it, and put an open map across the top instead. */
   @media (max-width: 1000px) {
     body:not(.input-only) #text-scroll { padding-right: 24px; }
+    body.has-right-party:not(.input-only) #text-scroll { padding-right: 230px; }
     body.bm-open:not(.input-only) #text-scroll { padding-right: 24px; padding-top: calc(34vh + 80px); }
     body:not(.input-only) #battle-map { left: 16px; right: 16px; width: auto; top: 56px; height: 34vh; }
   }
@@ -3948,6 +3980,8 @@
     <div class="sb-quests-header">Quests</div>
   </div>
 </div>
+<!-- Right-hand party column: player cards whose stats carry "side": "right" -->
+<div id="sidebar-right"></div>
 
 <!-- Text -->
 <div id="text-scroll">
@@ -6182,7 +6216,7 @@ document.getElementById('sheet-content').addEventListener('click', e => {
 });
 
 // Delegated listener — catches clicks on any .sb-player card even after DOM rebuilds
-document.getElementById('sidebar').addEventListener('click', function(e) {
+function _onSidebarClick(e) {
   // A condition pill takes precedence over the card → open its rule lookup
   // instead of the character sheet.
   const pill = e.target.closest('.sb-condition-pill[data-srd-name]');
@@ -6193,7 +6227,9 @@ document.getElementById('sidebar').addEventListener('click', function(e) {
   }
   const card = e.target.closest('.sb-player[data-player-name]');
   if (card) openSheet(card.dataset.playerName);
-});
+}
+document.getElementById('sidebar').addEventListener('click', _onSidebarClick);
+document.getElementById('sidebar-right').addEventListener('click', _onSidebarClick);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeSheet();
 });
@@ -6307,20 +6343,25 @@ function updateStats(stats) {
     _playerData[p.name] = existing;
   });
 
-  // Rebuild all player cards (insert before turn section)
+  // Rebuild all player cards (insert before turn section). A player whose
+  // stats say "side": "right" goes in the right-hand column instead.
+  const rightSidebar = document.getElementById('sidebar-right');
   const names = Object.keys(_playerData);
   names.forEach(name => {
     const p = _playerData[name];
     const prevHp = _prevHp[name];
     const newHp  = p.hp ? p.hp.current : undefined;
+    const target = (String(p.side || '').toLowerCase() === 'right') ? rightSidebar : sidebar;
 
-    const existing = sidebar.querySelector(`.sb-player[data-player-name="${CSS.escape(name)}"]`);
+    const existing = document.querySelector(`.sb-player[data-player-name="${CSS.escape(name)}"]`);
     const newCard = _buildPlayerCard(p, solo);
-    if (existing) {
-      sidebar.insertBefore(newCard, existing);
+    if (existing && existing.parentNode === target) {
+      target.insertBefore(newCard, existing);
       existing.remove();
     } else {
-      sidebar.insertBefore(newCard, turnSection);
+      if (existing) existing.remove();
+      if (target === sidebar) sidebar.insertBefore(newCard, turnSection);
+      else rightSidebar.appendChild(newCard);
     }
 
     // Flash HP numeral if HP changed
@@ -6336,6 +6377,9 @@ function updateStats(stats) {
   });
 
   sidebar.classList.add('has-data');
+  const hasRight = !!rightSidebar.querySelector('.sb-player');
+  rightSidebar.classList.toggle('has-data', hasRight);
+  document.body.classList.toggle('has-right-party', hasRight);
 
   // Faction panel
   if ('factions' in stats) {
@@ -8027,12 +8071,15 @@ let _sidebarVisible = true;
 
 function _setSidebarVisible(visible) {
   _sidebarVisible = visible;
+  const right = document.getElementById('sidebar-right');
   if (visible) {
     _sidebar.classList.remove('hidden');
+    if (right) right.classList.remove('hidden');
     _textScroll.classList.remove('sidebar-hidden');
     _sidebarBtn.textContent = '◀ Hide';
   } else {
     _sidebar.classList.add('hidden');
+    if (right) right.classList.add('hidden');
     _textScroll.classList.add('sidebar-hidden');
     _sidebarBtn.textContent = '▶ Stats';
   }
@@ -8177,6 +8224,9 @@ function connect() {
       document.querySelectorAll('.sb-player').forEach(el => el.remove());
       const sbEl = document.getElementById('sidebar');
       if (sbEl) sbEl.classList.remove('has-data');
+      const sbRightEl = document.getElementById('sidebar-right');
+      if (sbRightEl) sbRightEl.classList.remove('has-data');
+      document.body.classList.remove('has-right-party');
       const turnSectionEl = document.getElementById('sb-turn-section');
       if (turnSectionEl) turnSectionEl.style.display = 'none';
       _sidebarBtn.classList.remove('visible');
