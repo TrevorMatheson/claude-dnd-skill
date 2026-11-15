@@ -22,7 +22,7 @@ From the first live table test (see `docs/ROADMAP.md`).
 - The 2024 dataset builds into the data root (survives reinstalls) and fails loudly without PyYAML.
 
 **TV and phone**
-- The TV no longer shows a typing box (players act from their phones, the DM from the terminal). In a fight the battle map is smaller and carries the turn order in a column to its left, with the current turn highlighted and downed creatures struck through.
+- The TV no longer shows a typing box (players act from their phones, the DM from the terminal). The TV has two side panels, and Settings → Left panel / Right panel picks what each shows: Party, Turn order and the Battle map (by default Party and Turn order on the left, the map small in the right panel). A panel holding the map widens to fit it, a panel scrolls when its contents do not fit, and with Party on both sides a player pushed with "side": "right" sits on the right.
 - The phone Sheet tab is laid out like D&D Beyond: HP, AC, initiative and speed on top, the six abilities with their saves, then Actions, Skills, Spells, Inventory, Features and Notes tabs. Tapping an attack, damage, check, save or initiative fills in the Roll tab and opens it. A sheet not laid out like the template still shows as plain text.
 
 **Narration**
