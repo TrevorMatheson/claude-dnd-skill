@@ -65,8 +65,35 @@ class SttModuleTests(unittest.TestCase):
         fake = _FakeModel()
         stt._model = fake
         stt._state.update(on=True, reason="")
-        self.assertEqual(stt.transcribe(b"x", ["Anony", "Vac'uum", "Anony"]), "I swing my axe at the goblin.")
+        with mock.patch.object(stt, "_decode", return_value=[0.0] * 160):
+            self.assertEqual(stt.transcribe(b"x", ["Anony", "Vac'uum", "Anony"]), "I swing my axe at the goblin.")
         self.assertEqual(fake.prompts[0], "Names at this table: Anony, Vac'uum.")
+
+    def test_the_campaign_calendar_does_not_hide_the_real_one(self):
+        # scripts/calendar.py shadowed the stdlib calendar, so in the running
+        # display faster-whisper failed to import ("cannot import name 'timegm'").
+        src = (DISPLAY / "dnd-display-app.py").read_text(encoding="utf-8")
+        first = src.index("import calendar as _stdlib_calendar")
+        self.assertLess(first, src.index("from runtime_paths import"))   # it adds scripts/ to sys.path
+        self.assertLess(first, src.index("sys.path.insert(0, SCRIPTS_DIR)"))
+
+    def test_a_clip_is_decoded_to_16khz_mono_for_whisper(self):
+        # faster-whisper's own decoder breaks on PyAV 15+, so stt decodes clips itself.
+        try:
+            import av  # noqa: F401
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("PyAV not installed")
+        import io, math, struct, wave
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:            # 1 s of stereo 44.1 kHz tone
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+            w.writeframes(b"".join(struct.pack("<hh", v, v) for v in
+                                   (int(8000 * math.sin(i / 20)) for i in range(44100))))
+        samples = stt._decode(buf.getvalue())
+        self.assertAlmostEqual(len(samples), 16000, delta=400)
+        self.assertEqual(str(samples.dtype), "float32")
+        self.assertLessEqual(float(abs(samples).max()), 1.0)
 
 
 class MicServerTests(unittest.TestCase):
@@ -84,7 +111,9 @@ class MicServerTests(unittest.TestCase):
         self.sent = []
         self.fake = _FakeModel()
         self._p = [mock.patch.object(self.app, "_broadcast", side_effect=self.sent.append),
-                   mock.patch.object(self.app, "_device_ok", return_value="approved")]
+                   mock.patch.object(self.app, "_device_ok", return_value="approved"),
+                   # the uploads here are fake bytes; decoding is tested on its own
+                   mock.patch.object(self.app._stt, "_decode", return_value=[0.0] * 160)]
         for p in self._p:
             p.start()
         self.app._stt._model = self.fake

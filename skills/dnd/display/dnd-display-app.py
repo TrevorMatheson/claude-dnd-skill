@@ -41,6 +41,11 @@ from flask_cors import CORS
 _HERE         = os.path.dirname(os.path.abspath(__file__))
 _ROOT         = os.path.dirname(_HERE)
 SCRIPTS_DIR   = os.path.join(_ROOT, "scripts")
+# scripts/ has a calendar.py (the campaign calendar) that shadows the standard
+# library's calendar once scripts/ is on sys.path (runtime_paths puts it
+# there) — and http.cookiejar / huggingface_hub (speech-to-text) need the real
+# one. Load the real one first so it is the one cached in sys.modules.
+import calendar as _stdlib_calendar  # noqa: F401
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from runtime_paths import rt          # resolves <data-root>/.runtime

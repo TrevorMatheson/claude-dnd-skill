@@ -65,6 +65,35 @@ def load() -> dict:
     return state()
 
 
+SAMPLE_RATE = 16000
+
+
+def _decode(audio: bytes):
+    """Decode a clip to 16 kHz mono float32 samples, as Whisper wants them.
+
+    Done here rather than by faster-whisper's own decode_audio, which passes
+    an option PyAV 15+ no longer accepts (and Python 3.13 has no prebuilt
+    PyAV old enough), so a fresh `pip install faster-whisper` could load the
+    model and then fail every clip.
+    """
+    import av        # type: ignore  (installed with faster-whisper)
+    import numpy as np
+
+    chunks = []
+    with av.open(io.BytesIO(audio), mode="r") as container:
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
+        for frame in container.decode(audio=0):
+            for out in resampler.resample(frame):
+                chunks.append(out.to_ndarray().reshape(-1))
+            if sum(len(c) for c in chunks) > SAMPLE_RATE * (MAX_SECONDS + 5):
+                break
+        for out in resampler.resample(None):       # flush
+            chunks.append(out.to_ndarray().reshape(-1))
+    if not chunks:
+        return None
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+
 def transcribe(audio: bytes, hint_words: Optional[Iterable[str]] = None) -> str:
     """Turn one recorded clip (webm/opus, mp4/aac, wav, …) into text.
 
@@ -80,9 +109,12 @@ def transcribe(audio: bytes, hint_words: Optional[Iterable[str]] = None) -> str:
     words = [w for w in (hint_words or []) if w]
     if words:
         prompt = "Names at this table: " + ", ".join(dict.fromkeys(words)) + "."
+    samples = _decode(audio)
+    if samples is None or not len(samples):
+        return ""
     with _lock:
         segments, _info = _model.transcribe(
-            io.BytesIO(audio),
+            samples,
             language="en" if model_name().endswith(".en") else None,
             beam_size=5,
             vad_filter=True,                 # drop the silence before and after
