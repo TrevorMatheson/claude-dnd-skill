@@ -79,6 +79,13 @@ try:
 except Exception:
     _tts = None   # type: ignore
 
+# Speech-to-text for "pass the mic" — local faster-whisper; off (with a
+# reason) when it is not installed. See stt.py.
+try:
+    import stt as _stt
+except Exception:
+    _stt = None   # type: ignore
+
 
 def _apply_campaign_sfx_languages() -> None:
     """Read sfx_languages from the active campaign's state.md Session Flags.
@@ -1355,6 +1362,7 @@ def health():
         # The one voice state every screen follows (see _voice_check).
         "voice_on": _voice_payload()["on"],
         "voice_reason": _voice_payload()["reason"],
+        "mic": _mic_payload(),
     }, 200
 
 
@@ -2799,6 +2807,146 @@ def stage_input():
     return "", 204
 
 
+# ─── Pass the mic: one speaker at a time, transcribed on this PC ────────────
+# A phone claims the mic, records, uploads the clip to /stt, and the text comes
+# back into that player's action box to check and send. Only the holder can
+# upload; the mic frees itself after _MIC_HOLD_MAX seconds in case a phone
+# drops mid-sentence.
+_mic_lock = threading.Lock()
+_mic = {"holder": "", "device": "", "since": 0.0}
+_MIC_HOLD_MAX = 75.0
+
+
+def _mic_expire_locked() -> None:
+    if _mic["holder"] and _time.time() - _mic["since"] > _MIC_HOLD_MAX:
+        _mic.update(holder="", device="", since=0.0)
+
+
+def _stt_state() -> dict:
+    if _stt is None:
+        return {"on": False, "reason": "speech-to-text module didn't load"}
+    return _stt.state()
+
+
+def _mic_payload() -> dict:
+    with _mic_lock:
+        _mic_expire_locked()
+        holder = _mic["holder"]
+    st = _stt_state()
+    return {"holder": holder, "on": bool(st.get("on")), "reason": st.get("reason", "")}
+
+
+def _mic_request_checks():
+    """Common gate for the mic routes: token, device approval, party member.
+
+    Returns (character, device_id, None) or (None, None, response)."""
+    if not _token_ok():
+        return None, None, ("Forbidden", 403)
+    device_id = request.headers.get("X-DND-Device", "")
+    status = _device_ok(device_id, request.remote_addr)
+    if status == "denied":
+        return None, None, ("Forbidden", 403)
+    if status == "pending":
+        return None, None, (jsonify({"status": "pending"}), 202)
+    data = request.get_json(force=True, silent=True) if request.is_json else None
+    character = str((data or {}).get("character") or request.form.get("character") or "")[:50].strip()
+    with _stats_lock:
+        known = {p["name"] for p in _current_stats.get("players", [])}
+    if not character or character == "Everybody" or not _char_ok(character, known):
+        return None, None, ("Pick your character first", 400)
+    return character, device_id, None
+
+
+def _mic_release(character: str) -> bool:
+    with _mic_lock:
+        if _mic["holder"] and _mic["holder"].lower() == character.lower():
+            _mic.update(holder="", device="", since=0.0)
+            return True
+    return False
+
+
+@app.route("/mic/claim", methods=["POST"])
+def mic_claim():
+    """Take the mic. 200 {"holder"} when it is yours, 409 {"holder"} when
+    someone else is talking, 503 when speech-to-text is off."""
+    if not _rate_ok(request.remote_addr or "?"):
+        return "Too Many Requests", 429
+    character, device_id, err = _mic_request_checks()
+    if err:
+        return err
+    st = _stt_state()
+    if not st.get("on"):
+        return jsonify({"error": st.get("reason", "speech-to-text is off")}), 503
+    with _mic_lock:
+        _mic_expire_locked()
+        holder = _mic["holder"]
+        if holder and holder.lower() != character.lower():
+            return jsonify({"holder": holder}), 409
+        _mic.update(holder=character, device=device_id, since=_time.time())
+    _broadcast({"mic": _mic_payload()})
+    return jsonify({"holder": character}), 200
+
+
+@app.route("/mic/release", methods=["POST"])
+def mic_release():
+    character, _device, err = _mic_request_checks()
+    if err:
+        return err
+    if _mic_release(character):
+        _broadcast({"mic": _mic_payload()})
+    return "", 204
+
+
+def _stt_hint_words() -> list:
+    """Party, turn-order and map names, so Whisper spells them the table's way."""
+    with _stats_lock:
+        st = dict(_current_stats)
+    names = [p.get("name", "") for p in st.get("players", []) if isinstance(p, dict)]
+    to = st.get("turn_order") or {}
+    names += [n for n in (to.get("order") or []) if isinstance(n, str)]
+    m = st.get("map") or {}
+    names += [t.get("name", "") for t in (m.get("tokens") or []) if isinstance(t, dict)]
+    return [n for n in names if n][:40]
+
+
+@app.route("/stt", methods=["POST"])
+def stt_transcribe():
+    """Transcribe the mic holder's clip. Form: audio=<file>, character=<name>.
+    Returns {"text": "..."} and frees the mic."""
+    character, _device, err = _mic_request_checks()
+    if err:
+        return err
+    with _mic_lock:
+        _mic_expire_locked()
+        holder = _mic["holder"]
+    if not holder or holder.lower() != character.lower():
+        return jsonify({"error": "you don't have the mic", "holder": holder}), 409
+    try:
+        if (request.content_length or 0) > (_stt.MAX_CLIP_BYTES if _stt else 0) + 64 * 1024:
+            return jsonify({"error": "that recording is too long"}), 413
+        f = request.files.get("audio")
+        audio = f.read() if f else b""
+        if not audio:
+            return jsonify({"error": "no audio arrived"}), 400
+        try:
+            text = _stt.transcribe(audio, _stt_hint_words())
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 503
+        except Exception as e:
+            return jsonify({"error": f"couldn't understand that recording ({type(e).__name__})"}), 422
+        return jsonify({"text": _sanitize_input(text)}), 200
+    finally:
+        if _mic_release(character):
+            _broadcast({"mic": _mic_payload()})
+
+
+def _stt_start() -> None:
+    """Load the speech model in the background, then tell every phone."""
+    if _stt is not None:
+        _stt.load()
+    _broadcast({"mic": _mic_payload()})
+
+
 @app.route("/player-input/ready", methods=["POST"])
 def ready_input():
     """Toggle the ready flag for a staged character.
@@ -2998,6 +3146,9 @@ def stream():
         if _staged:
             q.put_nowait({"staged_inputs": _staged_snapshot()})
 
+    # Whether the mic works and who has it, so a phone shows the right button.
+    q.put_nowait({"mic": _mic_payload()})
+
     # Send current queue status so the 'Queued' indicator survives page reload.
     with _queue_status_lock:
         if _queue_status:
@@ -3083,6 +3234,7 @@ if __name__ == "__main__":
         _audio.set_broadcast(_broadcast)
     # Always: with no module or no key it still sets the "off, because…" state.
     threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
+    threading.Thread(target=_stt_start, daemon=True, name="stt-load").start()
 
     # 127.0.0.1, not "localhost": say exactly which address is bound (the
     # scripts connect there; see display_url.py).

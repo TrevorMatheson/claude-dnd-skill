@@ -2069,6 +2069,8 @@
 
   /* Tab bar — only shown in input-only mode, hidden on the TV view. */
   #dp-tabs { display: none; }
+  #mic-btn { display: none; }
+  body.input-only #mic-btn:not([hidden]) { display: inline-flex; }
   body.input-only #dp-tabs {
     display: flex !important;
     flex: 0 0 auto;
@@ -3952,6 +3954,23 @@
   }
   :root body.input-only.input-only #stage-btn:active { background: var(--c-accent-hi) !important; }
   :root body.input-only.input-only #stage-btn:disabled { opacity: .45; }
+  :root body.input-only.input-only #input-footer { display: flex !important; align-items: stretch; }
+  :root body.input-only.input-only #mic-btn:not([hidden]) {
+    flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font: 600 16px/1 var(--c-sans) !important; color: var(--c-text) !important; background: var(--c-surface) !important;
+    border: 1px solid var(--c-line2) !important; border-radius: 12px !important; min-height: 48px; padding: 0 16px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  :root body.input-only.input-only #mic-btn::before {
+    content: ''; width: 14px; height: 14px; flex: none; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12z'/></svg>") center/contain no-repeat;
+  }
+  :root body.input-only.input-only #mic-btn.recording { background: var(--c-bad) !important; border-color: var(--c-bad) !important; color: #fff !important; animation: mic-pulse 1.2s ease-in-out infinite; }
+  :root body.input-only.input-only #mic-btn.recording::before { -webkit-mask: none; mask: none; border-radius: 3px; width: 11px; height: 11px; }
+  :root body.input-only.input-only #mic-btn.busy,
+  :root body.input-only.input-only #mic-btn.taken { color: var(--c-mute) !important; opacity: 1; cursor: default; }
+  @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(217,106,91,.5); } 50% { box-shadow: 0 0 0 6px rgba(217,106,91,0); } }
   :root body.input-only.input-only #skip-turn-btn {
     font: 500 14px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
     color: var(--c-text2) !important; background: transparent !important; border: 1px solid var(--c-line2) !important;
@@ -4272,6 +4291,7 @@
               data-tab-section="move"></textarea>
     <div id="input-footer" data-tab-section="move">
       <button id="skip-turn-btn" style="display:none" title="Skip this character's turn">Skip Turn</button>
+      <button id="mic-btn" type="button" hidden aria-label="Talk: record your move">Talk</button>
       <button id="stage-btn">Stage</button>
     </div>
     <!-- Phone-only dice pad (shown by ?view=input) -->
@@ -7843,6 +7863,7 @@ function _buildCharTabs(players) {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       _selectedChar = name;
+      if (typeof _micRender === 'function') _micRender();
       _charTabs.querySelectorAll('.char-tab').forEach(b =>
         b.classList.toggle('active', b.dataset.char === name)
       );
@@ -8308,6 +8329,145 @@ async function _skipTurn(char) {
 _stageBtn.addEventListener('click', _stageAction);
 _skipTurnBtn.addEventListener('click', () => _skipTurn(_selectedChar));
 
+// ── Pass the mic ──────────────────────────────────────────────────
+// One speaker at a time: Talk claims the mic on the server, records, and
+// uploads the clip; the PC transcribes it (local Whisper) and the words land
+// in this box to check and Stage. Hidden when speech-to-text is off.
+const _micBtn = document.getElementById('mic-btn');
+let _micState = { holder: '', on: false, reason: '' };
+let _micRec = null, _micStream = null, _micChunks = [], _micTick = null, _micT0 = 0, _micBusy = false;
+const _MIC_MAX_MS = 45000;
+const _micCan = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+// Who is talking: the character picked on the Move tab, or, with
+// "Everybody" picked, the character this phone was opened for (?char=).
+function _micWho() {
+  if (_selectedChar && _selectedChar !== 'Everybody') return _selectedChar;
+  const qp = new URLSearchParams(location.search);
+  return (qp.get('char') || qp.get('character') || '').trim();
+}
+function _micMine() {
+  return !!_micState.holder && _micState.holder.toLowerCase() === _micWho().toLowerCase();
+}
+
+function _micRender() {
+  if (!_micBtn) return;
+  _micBtn.hidden = !document.body.classList.contains('input-only') || !_micState.on;
+  _micBtn.classList.remove('recording', 'busy', 'taken');
+  _micBtn.disabled = false;
+  if (_micRec) {
+    const secs = Math.floor((Date.now() - _micT0) / 1000);
+    _micBtn.textContent = `Stop · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    _micBtn.classList.add('recording');
+  } else if (_micBusy) {
+    _micBtn.textContent = 'Writing it down…';
+    _micBtn.classList.add('busy');
+    _micBtn.disabled = true;
+  } else if (_micState.holder && !_micMine()) {
+    _micBtn.textContent = `${_micState.holder} is talking`;
+    _micBtn.classList.add('taken');
+    _micBtn.disabled = true;
+  } else {
+    _micBtn.textContent = 'Talk';
+  }
+}
+
+function _micHeaders(json) {
+  const h = _authHeaders();
+  if (!json) delete h['Content-Type'];
+  return h;
+}
+
+function _micReleaseQuiet() {
+  fetch('/mic/release', { method: 'POST', headers: _micHeaders(true),
+    body: JSON.stringify({ character: _micWho() }) }).catch(() => {});
+}
+
+async function _micStartTalk() {
+  if (!_micCan) {
+    _showToast('The mic needs a secure (https) link to this page. Typing still works.', 7000);
+    return;
+  }
+  if (!_micWho()) {
+    _showToast('Pick your character above, then tap Talk.', 5000);
+    return;
+  }
+  let res;
+  try {
+    res = await fetch('/mic/claim', { method: 'POST', headers: _micHeaders(true),
+      body: JSON.stringify({ character: _micWho() }) });
+  } catch (_) { _showToast("Couldn't reach the table to take the mic.", 5000); return; }
+  if (res.status === 409) {
+    const d = await res.json().catch(() => ({}));
+    _showToast(`${d.holder || 'Someone'} has the mic — wait for them to finish.`, 4000);
+    return;
+  }
+  if (res.status === 202) { _showToast('This phone is waiting for the DM to approve it.', 5000); return; }
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    _showToast('Mic unavailable: ' + (d.error || ('error ' + res.status)), 6000);
+    return;
+  }
+  try {
+    _micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (_) {
+    _micReleaseQuiet();
+    _showToast('This browser blocked the microphone. Allow it in the site settings and try again.', 7000);
+    return;
+  }
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+    .find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+  _micChunks = [];
+  _micRec = new MediaRecorder(_micStream, mime ? { mimeType: mime } : undefined);
+  _micRec.ondataavailable = e => { if (e.data && e.data.size) _micChunks.push(e.data); };
+  _micRec.onstop = _micSend;
+  _micRec.start(250);
+  _micT0 = Date.now();
+  _micTick = setInterval(() => {
+    if (Date.now() - _micT0 >= _MIC_MAX_MS) _micStopTalk(); else _micRender();
+  }, 250);
+  _micRender();
+}
+
+function _micStopTalk() {
+  clearInterval(_micTick); _micTick = null;
+  if (_micRec && _micRec.state !== 'inactive') _micRec.stop();
+}
+
+async function _micSend() {
+  const rec = _micRec;
+  _micRec = null;
+  if (_micStream) { _micStream.getTracks().forEach(t => t.stop()); _micStream = null; }
+  const type = (rec && rec.mimeType) || 'audio/webm';
+  const blob = new Blob(_micChunks, { type });
+  _micChunks = [];
+  if (!blob.size) { _micReleaseQuiet(); _micRender(); return; }
+  _micBusy = true; _micRender();
+  try {
+    const fd = new FormData();
+    fd.append('character', _micWho());
+    fd.append('audio', blob, 'clip.' + (type.includes('mp4') ? 'mp4' : 'webm'));
+    const res = await fetch('/stt', { method: 'POST', headers: _micHeaders(false), body: fd });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { _showToast("Didn't catch that: " + (d.error || ('error ' + res.status)), 6000); return; }
+    const said = String(d.text || '').trim();
+    if (!said) { _showToast("Didn't hear any words — try again a little closer.", 5000); return; }
+    const cur = _inputText.value.trim();
+    _inputText.value = cur ? cur + ' ' + said : said;
+    _inputText.dispatchEvent(new Event('input', { bubbles: true }));
+    _inputText.focus();
+  } catch (_) {
+    _showToast("Couldn't send the recording to the table.", 5000);
+  } finally {
+    _micBusy = false; _micRender();
+  }
+}
+
+if (_micBtn) {
+  _micBtn.addEventListener('click', () => { if (_micRec) _micStopTalk(); else if (!_micBusy) _micStartTalk(); });
+}
+window.addEventListener('pagehide', () => { if (_micRec || _micMine()) _micReleaseQuiet(); });
+
 // Ctrl/Cmd+Enter stages from textarea
 _inputText.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -8644,6 +8804,7 @@ function connect() {
       }
     }
     if (payload.voice) _voiceSet(payload.voice.on, payload.voice.reason);
+    if (payload.mic) { _micState = payload.mic; _micRender(); }
     if (payload.tts_quota) _ttsQuotaNotice(Number(payload.tts_quota.retry_after) || 60);
     if (payload.awaiting !== undefined) {
       _awaitingNames = payload.awaiting;
