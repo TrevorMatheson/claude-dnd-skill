@@ -2069,6 +2069,23 @@
 
   /* Tab bar — only shown in input-only mode, hidden on the TV view. */
   #dp-tabs { display: none; }
+  /* "Waiting on …" banner. TV: a pill at the top centre. Phone: under the tabs. */
+  #wait-banner[hidden] { display: none !important; }
+  body:not(.input-only) #wait-banner {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 40;
+    max-width: min(70vw, 760px); padding: 9px 22px; border-radius: 999px;
+    background: var(--e-strong, rgba(14, 10, 4, .82)); color: var(--e-on-strong, #f4e2a8);
+    border: 1px solid var(--e-hair-strong, rgba(201, 168, 76, .55));
+    font: 600 17px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: .01em;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .45); text-align: center; pointer-events: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  body:not(.input-only) #wait-banner.dm { opacity: .85; font-weight: 500; }
+  /* Phone: one box, Send and Talk. No per-player tabs, staged list or old status strip. */
+  body.input-only #char-tabs,
+  body.input-only #staged-queue,
+  body.input-only #waiting-indicator,
+  body.input-only #phone-status { display: none !important; }
   #mic-btn { display: none; }
   body.input-only #mic-btn:not([hidden]) { display: inline-flex; }
   body.input-only #dp-tabs {
@@ -3920,6 +3937,15 @@
   }
   :root body.input-only.input-only .ph-set-select option { background: var(--c-surface); color: var(--c-text); font-family: var(--c-sans); }
 
+  /* Waiting-on banner */
+  :root body.input-only.input-only #wait-banner {
+    margin: 12px 14px 2px; padding: 12px 16px; border-radius: 14px;
+    font: 600 15px/1.35 var(--c-sans); color: var(--c-text); text-align: center;
+    background: var(--c-surface); border: 1px solid var(--c-line);
+  }
+  :root body.input-only.input-only #wait-banner.you { background: var(--c-accent-soft); border-color: var(--c-accent); }
+  :root body.input-only.input-only #wait-banner.dm { color: var(--c-text2); font-weight: 500; }
+
   /* Turn status card */
   :root body.input-only.input-only #phone-status {
     margin: 14px 14px 10px !important; padding: 14px 16px !important; border-radius: 14px !important;
@@ -4281,6 +4307,7 @@
       <button class="dp-tab"        data-tab="roll" type="button">Roll</button>
       <button class="dp-tab"        data-tab="character" type="button">Sheet</button>
     </div>
+    <div id="wait-banner" hidden role="status" aria-live="polite"></div>
     <div id="phone-status" data-tab-section="move"></div>
     <div id="staged-queue" data-tab-section="move"></div>
     <div id="waiting-indicator" data-tab-section="move"></div>
@@ -4292,7 +4319,7 @@
     <div id="input-footer" data-tab-section="move">
       <button id="skip-turn-btn" style="display:none" title="Skip this character's turn">Skip Turn</button>
       <button id="mic-btn" type="button" hidden aria-label="Talk: record your move">Talk</button>
-      <button id="stage-btn">Stage</button>
+      <button id="stage-btn">Send</button>
     </div>
     <!-- Phone-only dice pad (shown by ?view=input) -->
     <div id="dice-pad" data-tab-section="roll">
@@ -7841,6 +7868,20 @@ const _stagedQueueEl   = document.getElementById('staged-queue');
 const _waitingEl       = document.getElementById('waiting-indicator');
 
 let _selectedChar     = 'Everybody';
+// The character this phone acts as. A phone opened for one character
+// (?char=, or the name picked on its first screen) always speaks and sends
+// as that character; there are no per-player tabs on the phone. The TV's
+// input panel keeps the tabs.
+function _phoneChar() {
+  const qp = new URLSearchParams(location.search);
+  let n = (qp.get('char') || qp.get('character') || '').trim();
+  if (!n) { try { n = (localStorage.getItem('dnd_player_name') || '').trim(); } catch (_) {} }
+  return n.slice(0, 50);
+}
+function _actingChar() {
+  if (document.body.classList.contains('input-only')) return _phoneChar() || 'Everybody';
+  return _selectedChar;
+}
 let _stagedData       = {};   // {char: {text, ready, timestamp}} — mirror of server state
 let _autorunThreshold = null; // null = use player count; int = explicit threshold
 let _awaitingNames = null;    // names the DM is waiting on (server "awaiting"), null = party
@@ -7895,7 +7936,7 @@ function _refreshPhoneStatus() {
   const el = document.getElementById('phone-status');
   if (!el) return;
   if (el.dataset.state === 'sending' || el.dataset.state === 'resolving') return;  // transient holds
-  const mine = _stagedData && (_stagedData[_selectedChar] || _stagedData['Everybody']);
+  const mine = _stagedData && (_stagedData[_actingChar()] || _stagedData['Everybody']);
   _setPhoneStatus(mine ? 'sent' : 'compose');
 }
 
@@ -7955,6 +7996,7 @@ function _renderStagedQueue(data) {
   });
 
   _refreshPhoneStatus();
+  _waitRender();
 
   // Badge + auto-open
   if (entries.length > 0) {
@@ -8046,7 +8088,68 @@ function _stopAutorunCountdown() {
 }
 
 // ── Queue status panel (persists until wrapper injects) ──────────
+// ── "Waiting on …" banner (phone and TV) ─────────────────────────
+// Who the table is waiting on: the DM's awaiting list, else whoever's turn
+// it is, else the whole party — minus anyone who has already sent. Once
+// everything is in, it reads "The DM is responding…" until the DM's reply
+// has stopped arriving (or the DM names who to wait on next).
+let _waitQueued = [];          // names sitting in the DM's queue
+let _waitDmBusy = false;       // the DM has picked the moves up
+let _waitIdleTimer = null;
+function _waitNames() {
+  if (Array.isArray(_awaitingNames) && _awaitingNames.length) return _awaitingNames.slice();
+  const cur = _currentTurnOrder && _currentTurnOrder.current;
+  const party = Object.keys(_playerData || {});
+  if (cur && party.some(n => n.toLowerCase() === String(cur).toLowerCase())) return [cur];
+  return party;
+}
+function _waitList(names) {
+  if (names.length <= 1) return names.join('');
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+function _waitRender() {
+  const el = document.getElementById('wait-banner');
+  if (!el) return;
+  // It lives under the phone's tabs; the TV hides that panel, so there it
+  // sits on the page itself.
+  if (!document.body.classList.contains('input-only') && el.parentNode !== document.body) document.body.appendChild(el);
+  let text = '', cls = '';
+  if (_waitDmBusy || _waitQueued.length) {
+    text = 'The DM is responding…'; cls = 'dm';
+  } else {
+    const sent = new Set(Object.entries(_stagedData || {})
+      .filter(([, v]) => v && v.ready).map(([c]) => c.toLowerCase()));
+    const everyone = sent.has('everybody');
+    const left = everyone ? [] : _waitNames().filter(n => !sent.has(String(n).toLowerCase()));
+    const me = document.body.classList.contains('input-only') ? _phoneChar().toLowerCase() : '';
+    const mine = me && left.some(n => n.toLowerCase() === me);
+    const others = left.filter(n => n.toLowerCase() !== me);
+    if (mine && !others.length) { text = 'Waiting on your response'; cls = 'you'; }
+    else if (mine) { text = `Waiting on you and ${_waitList(others)}`; cls = 'you'; }
+    else if (others.length === 1) text = `Waiting on ${others[0]}'s response`;
+    else if (others.length) text = `Waiting on ${_waitList(others)}`;
+    else if (sent.size) { text = 'Sent — the DM is up next'; cls = 'dm'; }
+  }
+  el.hidden = !text;
+  el.textContent = text;
+  el.className = cls;
+}
+function _waitDmPickedUp() {
+  _waitDmBusy = true; _waitRender();
+  clearTimeout(_waitIdleTimer);
+  _waitIdleTimer = setTimeout(() => { _waitDmBusy = false; _waitRender(); }, 90000);
+}
+function _waitDmWrote() {
+  // Each piece of the DM's reply pushes the "responding" state back; 12 s of
+  // quiet after the last one means the reply is done and players are up.
+  if (!_waitDmBusy && !_waitQueued.length) return;
+  clearTimeout(_waitIdleTimer);
+  _waitIdleTimer = setTimeout(() => { _waitDmBusy = false; _waitRender(); }, 12000);
+}
+
 function _renderQueueStatus(chars) {
+  _waitQueued = Array.isArray(chars) ? chars.slice() : [];
+  if (_waitQueued.length) _waitDmPickedUp(); else _waitRender();
   if (!chars || chars.length === 0) {
     _waitingEl.style.display = 'none';
     _waitingEl.innerHTML = '';
@@ -8241,7 +8344,8 @@ async function _stageAction() {
   _setPhoneStatus('sending');
 
   // Cache submission in localStorage so text survives page reload
-  localStorage.setItem('dnd_staged_input', JSON.stringify({ char: _selectedChar, text, ts: Date.now() }));
+  const who = _actingChar();
+  localStorage.setItem('dnd_staged_input', JSON.stringify({ char: who, text, ts: Date.now() }));
 
   let attempts = 0;
   let _sent = false;
@@ -8252,7 +8356,7 @@ async function _stageAction() {
       const res = await fetch('/player-input/stage', {
         method: 'POST',
         headers: _authHeaders(),
-        body: JSON.stringify({ character: _selectedChar, text }),
+        body: JSON.stringify({ character: who, text }),
       });
       _lastStatus = res.status;
       if (res.status === 202) {
@@ -8266,7 +8370,7 @@ async function _stageAction() {
         localStorage.removeItem('dnd_staged_input');
         localStorage.removeItem('dnd_awaiting_approval');
         _inputText.value = '';
-        _toggleReady(_selectedChar);   // one-tap: staging immediately sends to the DM
+        _toggleReady(who);   // one tap: Send stages and readies in one go
         _setPhoneStatus('sent');
         _sent = true;
         break;
@@ -8282,10 +8386,10 @@ async function _stageAction() {
   }
   _stageBtn.disabled = false;
   if (_sent) {
-    _stageBtn.textContent = 'Stage';
+    _stageBtn.textContent = 'Send';
   } else {
     // Honest failure: the text + the dnd_staged_input cache are preserved, so a
-    // tap re-sends without retyping. Never silently reset to 'Stage' on failure —
+    // tap re-sends without retyping. Never silently reset to 'Send' on failure —
     // that's what read as "submitted but not acknowledged, gone forever".
     _stageBtn.textContent = _lastStatus
       ? `Send failed (${_lastStatus}) — tap to retry`
@@ -8327,7 +8431,7 @@ async function _skipTurn(char) {
 }
 
 _stageBtn.addEventListener('click', _stageAction);
-_skipTurnBtn.addEventListener('click', () => _skipTurn(_selectedChar));
+_skipTurnBtn.addEventListener('click', () => _skipTurn(_actingChar()));
 
 // ── Pass the mic ──────────────────────────────────────────────────
 // One speaker at a time: Talk claims the mic on the server, records, and
@@ -8339,12 +8443,10 @@ let _micRec = null, _micStream = null, _micChunks = [], _micTick = null, _micT0 
 const _MIC_MAX_MS = 45000;
 const _micCan = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 
-// Who is talking: the character picked on the Move tab, or, with
-// "Everybody" picked, the character this phone was opened for (?char=).
+// Who is talking: the character this phone acts as (never "Everybody").
 function _micWho() {
-  if (_selectedChar && _selectedChar !== 'Everybody') return _selectedChar;
-  const qp = new URLSearchParams(location.search);
-  return (qp.get('char') || qp.get('character') || '').trim();
+  const c = _actingChar();
+  return c === 'Everybody' ? '' : c;
 }
 function _micMine() {
   return !!_micState.holder && _micState.holder.toLowerCase() === _micWho().toLowerCase();
@@ -8602,7 +8704,7 @@ function _onDeviceApproved(deviceId) {
   if (deviceId === _deviceId) {
     localStorage.removeItem('dnd_awaiting_approval');
     _stageBtn.disabled = false;
-    _stageBtn.textContent = 'Stage';
+    _stageBtn.textContent = 'Send';
     if (_inputText.value.trim()) {
       _stageAction();  // auto-retry with cached text
     }
@@ -8771,6 +8873,7 @@ function connect() {
 
     if (payload.stats) {
       updateStats(payload.stats);
+      _waitRender();
       try { _bmUpdate(payload.stats); } catch (err) { console.warn('[DnD] battle map', err); }
       if (payload.stats.players && payload.stats.players.length > 0) {
         _sidebarBtn.classList.add('visible');
@@ -8791,6 +8894,7 @@ function connect() {
       _renderQueueStatus(payload.queue_status);
     }
     if (payload.dm_processing) {
+      _waitDmPickedUp();
       _showProcessingIndicator();
       // Phone: confirm the DM actually picked up the move (not just that it queued).
       if (document.body.classList.contains('input-only')) {
@@ -8808,6 +8912,7 @@ function connect() {
     if (payload.tts_quota) _ttsQuotaNotice(Number(payload.tts_quota.retry_after) || 60);
     if (payload.awaiting !== undefined) {
       _awaitingNames = payload.awaiting;
+      _waitDmBusy = false; clearTimeout(_waitIdleTimer);   // the DM says who is up
       _renderStagedQueue(_stagedData);
     }
     if (payload.autorun_threshold !== undefined) {
@@ -8881,6 +8986,7 @@ function connect() {
     if (payload.xp_award) {
       renderXpBlock(payload.xp_award);
     }
+    if (payload.text && !payload.player && !payload.action) _waitDmWrote();
     if (payload.text && !payload.inspiration_award && !payload.milestone_award && !payload.milestone_spend && !payload.xp_award) {
       if (payload.action) {
         renderActionBlock(payload.action, payload.text);
