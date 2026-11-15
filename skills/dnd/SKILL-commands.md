@@ -31,7 +31,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 4. Copy and populate templates from `${CLAUDE_SKILL_DIR}/templates/` — state.md, world.md, npcs.md, session-log.md. The state.md header keeps the `**Ruleset:**` field set in step 2.
 5. Ask: **party size** and **starting level**
 6. **Tone/Genre Wizard** — present all four in one message:
-   - Tone: `grimdark / dark fantasy / heroic / horror / political / swashbuckling / cosmic`
+   - Tone: `dungeon-crawl comedy (default) / grimdark / dark fantasy / heroic / horror / political / swashbuckling / cosmic` — any tone but the comedy also asks *"Keep the snarky announcer narrator, or play it straight?"* and writes `narrator: crawler` or `narrator: classic` to `## Session Flags`
    - Magic level: `none / low / medium / high`
    - Setting type: `medieval / renaissance / ancient / nautical / underground`
    - Danger level: `lethal / gritty / standard / heroic`
