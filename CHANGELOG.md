@@ -21,6 +21,10 @@ From the first live table test (see `docs/ROADMAP.md`).
 - DM Help says why it's unavailable instead of failing silently, and no longer hard-codes model ids.
 - The 2024 dataset builds into the data root (survives reinstalls) and fails loudly without PyYAML.
 
+**TV and phone**
+- The TV no longer shows a typing box (players act from their phones, the DM from the terminal). In a fight the battle map is smaller and carries the turn order in a column to its left, with the current turn highlighted and downed creatures struck through.
+- The phone Sheet tab is laid out like D&D Beyond: HP, AC, initiative and speed on top, the six abilities with their saves, then Actions, Skills, Spells, Inventory, Features and Notes tabs. Tapping an attack, damage, check, save or initiative fills in the Roll tab and opens it. A sheet not laid out like the template still shows as plain text.
+
 **Narration**
 - Rolls are shown, never spoken: dice blocks no longer get a play bar (the setting is now "Read hints aloud"), and roll mechanics written inline in narration, such as "(d20+5 = 17)" or "[18 vs AC 15]", are left out of the voice.
 - The typewriter writes once per frame instead of once per character, keeps one text node per run and moves the cursor only when the paragraph changes, so text no longer shakes on the TV or phones while it types.
