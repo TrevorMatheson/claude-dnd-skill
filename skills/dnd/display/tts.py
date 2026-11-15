@@ -160,6 +160,52 @@ def key_source() -> str:
     return "unset"
 
 
+def key_fingerprint() -> str:
+    """A short hash of the current key, so a replaced key can be noticed
+    without keeping or printing the key itself. "" when no key is set."""
+    key = _get_api_key()
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12] if key else ""
+
+
+def check_key(timeout: float = 10.0) -> tuple:
+    """Ask Google whether this key can use the voice model, without speaking.
+
+    Reads the model's metadata (GET models/<model>), which spends none of
+    the key's generation quota, so it is safe to run at every start.
+    Returns (ok, reason, retry): reason is a short plain-English cause when
+    ok is False, and retry says whether trying again later could help (a
+    network failure) or not (a rejected key).
+    """
+    key = _get_api_key()
+    if not key:
+        return False, "no voice key is set up", False
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}?key={key}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=timeout) as resp:
+            if resp.status == 200:
+                return True, "", False
+            return False, f"Google answered {resp.status}", True
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        if (e.code == 400 and "API_KEY_INVALID" in body) or e.code == 401:
+            return False, "Google rejected the voice key", False
+        if e.code == 403:
+            return False, "the voice key isn't allowed to use Gemini", False
+        if e.code == 404:
+            return False, "this key can't use the voice model", False
+        if e.code == 429:
+            return False, "the voice key is rate-limited", True
+        return False, f"Google answered {e.code}", True
+    except urllib.error.URLError:
+        return False, "couldn't reach Google to check the voice", True
+    except Exception as e:  # pragma: no cover - defensive
+        return False, f"voice check failed ({type(e).__name__})", True
+
+
 # ── Synthesis ───────────────────────────────────────────────────────────────
 
 class TtsError(Exception):

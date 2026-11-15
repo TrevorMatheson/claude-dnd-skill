@@ -27,6 +27,7 @@ From the first live table test (see `docs/ROADMAP.md`).
 - The phone view uses the Claude desktop app's colours in both skins: warm charcoal in dark mode, cream in light mode, clay-orange for the main buttons and anything selected, and a plain sans-serif. The tabs, Roll pad, sheet, settings menu and character picker all follow it, and the starfield behind the phone is gone.
 
 **Narration**
+- The voice works fully or stays off. The display checks the Gemini key when it starts, by reading the voice model's details, which spends no quota. With no key, a rejected key or the daily quota used up, every screen hides its play buttons, says why once, and shows the narration as text only. The browser's own robot voice is no longer used as a stand-in. The voice comes back on by itself when the key changes or the quota resets, and `doctor` reports the reason.
 - Rolls are shown, never spoken: dice blocks no longer get a play bar (the setting is now "Read hints aloud"), and roll mechanics written inline in narration, such as "(d20+5 = 17)" or "[18 vs AC 15]", are left out of the voice.
 - The typewriter writes once per frame instead of once per character, keeps one text node per run and moves the cursor only when the paragraph changes, so text no longer shakes on the TV or phones while it types.
 - `send.py --turn` sends a whole DM turn in one call, in order.

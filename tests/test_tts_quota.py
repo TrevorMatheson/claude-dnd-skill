@@ -6,7 +6,8 @@ GenerateRequestsPerDayPerProjectPerModel-FreeTier), a turn makes 3-4, and
 every request after that came back 429 → our 502 → the page silently fell
 back to the browser's robot voice. Now the server parses the quota and the
 retry delay, answers 429 at once without calling Gemini until it resets
-(cached clips still play), and broadcasts tts_quota so the TV says why.
+(cached clips still play), and turns the voice off for every screen with a
+reason, so the TV says why (see test_voice_on_or_off.py).
 No request here reaches Gemini.
 """
 import importlib.util
@@ -69,6 +70,7 @@ class TestServer(unittest.TestCase):
     def setUp(self):
         self.app._tts_quota_until = 0.0
         self.app._rate_buckets.clear()
+        self.app._voice.update(on=True, reason="")
         self.sent = []
         self._p = [mock.patch.object(self.app, "_broadcast", side_effect=self.sent.append),
                    mock.patch.object(self.app._tts, "key_source", return_value="env:GEMINI_API_KEY")]
@@ -111,7 +113,6 @@ class TestPage(unittest.TestCase):
         self.assertIn("if (payload.tts_quota) _ttsQuotaNotice(", src)
         # a page opened after the quota ran out learns it from the 429 reply
         self.assertIn("if (resp.status === 429) _ttsQuotaNotice(resp.headers.get('Retry-After'));", src)
-        self.assertIn("if (err.message === 'TTS 429')", src)
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ class TestPageWiring(unittest.TestCase):
         # _flushForBlock) may call _addTtsBar without the replay option.
         bare = [c for c in calls if "," not in c and c.strip() != "blockEl"]
         self.assertEqual(sorted(set(bare)), ["currentEl"], f"calls: {calls}")
-        self.assertIn("if (_ttsAutoNarrate && !isReplay)", self.src)
+        self.assertIn("if (_ttsAutoNarrate && !isReplay && _voiceOn)", self.src)
 
     def test_voice_reaches_deferred_renderers(self):
         # renderNPCBlock / renderTutorBlock defer to *Now functions; the voice

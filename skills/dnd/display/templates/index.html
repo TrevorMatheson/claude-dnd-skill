@@ -7,7 +7,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="dnd-token" content="{{ lan_token }}">
 <meta name="narrator-voice" content="{{ narrator_voice }}">
-<meta name="tts-available" content="{{ '1' if tts_available else '0' }}">
+<meta name="voice-on" content="{{ '1' if voice_on else '0' }}">
+<meta name="voice-reason" content="{{ voice_reason }}">
 
 <!-- Theme anti-FOUC. Runs synchronously before the stylesheet parses so the
      correct data-theme attribute is on <html> before any rule resolves —
@@ -2587,6 +2588,10 @@
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   }
   #tts-audio-gate svg { width: 22px; height: 22px; }
+  /* Voice off (no key, key rejected, quota used up): text only, no play buttons. */
+  body.voice-off .tts-bar,
+  body.voice-off #tts-audio-gate { display: none !important; }
+  .audio-row.voice-unavailable .narrate-label { opacity: .55; }
   #dp-phys-row { gap: 8px; }
   #dp-phys {
     flex: 1; min-width: 0; font-size: 18px; padding: 10px 12px; border-radius: 10px;
@@ -7210,8 +7215,11 @@ document.getElementById('speed-row').addEventListener('click', () => {
 const _TTS_VOICES_MALE   = ['Charon', 'Enceladus', 'Fenrir', 'Umbriel'];
 const _TTS_VOICES_FEMALE = ['Aoede', 'Gacrux', 'Kore', 'Vindemiatrix', 'Zephyr'];
 
-const _ttsAvailableMeta = document.querySelector('meta[name="tts-available"]');
-const _TTS_AVAILABLE = _ttsAvailableMeta && _ttsAvailableMeta.getAttribute('content') === '1';
+// The voice works fully or stays off. The server checks it at start (and
+// again when the key changes or the quota resets) and tells every screen;
+// there is no browser-voice fallback.
+let _voiceOn = (document.querySelector('meta[name="voice-on"]') || {}).content === '1';
+let _voiceReason = (document.querySelector('meta[name="voice-reason"]') || {}).content || '';
 
 const _narratorVoiceMeta = document.querySelector('meta[name="narrator-voice"]');
 let _ttsVoice = (_narratorVoiceMeta && _narratorVoiceMeta.getAttribute('content'))
@@ -7228,157 +7236,9 @@ let _ttsAutoNarrate = localStorage.getItem('dnd_tts_auto') !== '0';
 let _ttsReadAll = (() => { try { return localStorage.getItem('dnd_tts_read_all') === '1'; } catch (_) { return false; } })();
 // Clip fetched ahead of time for the next queued block: blockEl -> Promise<ArrayBuffer>
 const _ttsPrefetch = new WeakMap();
-// After a 503 (no key) the page used to stop asking the server until reload, so
-// a key added mid-session needed a refresh. Now it asks again after a minute,
-// or at once when the server announces tts_available.
-let _ttsRetryAt = 0;
-
 let _ttsCtx = null;
 let _ttsActiveSource = null;
 let _ttsActivePlayBtn = null;
-
-// Free fallback: the browser's own speech synthesis, no API key needed.
-// Used when /tts has no key configured (503) or fails. Without this, a
-// keyless install got a play button that flashed "TTS 503" for three seconds
-// and never spoke -- the server path was the only path.
-let _ttsServerOk = true;
-function _ttsServerUsable() {
-  if (!_ttsServerOk && Date.now() >= _ttsRetryAt) _ttsServerOk = true;
-  return _ttsServerOk;
-}
-let _ttsUtterance = null;
-const _TTS_HAS_BROWSER = 'speechSynthesis' in window;
-if (_TTS_HAS_BROWSER) {
-  // Chrome populates the voice list asynchronously; the first call primes it.
-  speechSynthesis.getVoices();
-  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
-}
-
-// The language the text itself is written in, where its script says. This
-// page's <html lang> is a static "en" whatever the campaign is played in, so
-// without this a Japanese or Russian block went to an English voice, which
-// reads it as silence or noise. A script shared by several languages takes
-// the browser's first language that uses it, else the script's most common
-// one; Latin text returns null and leaves the choice to the chain below.
-const _TTS_SHARED_SCRIPTS = [
-  [/[\u0400-\u04ff]/, ['ru', 'uk', 'bg', 'sr', 'mk', 'be', 'kk', 'ky', 'mn', 'tg']],
-  [/[\u0600-\u06ff]/, ['ar', 'fa', 'ur', 'ps']],
-];
-function _ttsScriptLang(text) {
-  const t = String(text || '');
-  if (/[\u3040-\u30ff]/.test(t)) return 'ja';
-  if (/[\uac00-\ud7af\u1100-\u11ff]/.test(t)) return 'ko';
-  if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(t)) return 'zh';
-  if (/[\u0e00-\u0e7f]/.test(t)) return 'th';
-  if (/[\u0370-\u03ff]/.test(t)) return 'el';
-  if (/[\u0590-\u05ff]/.test(t)) return 'he';
-  for (const [re, langs] of _TTS_SHARED_SCRIPTS) {
-    if (!re.test(t)) continue;
-    const nav = (navigator.languages && navigator.languages.length
-      ? navigator.languages : [navigator.language])
-      .map(l => String(l || '').slice(0, 2).toLowerCase());
-    return nav.find(l => langs.includes(l)) || langs[0];
-  }
-  return null;
-}
-
-function _ttsPickBrowserVoice(text) {
-  const voices = speechSynthesis.getVoices() || [];
-  if (!voices.length) return null;
-  // Preference order: the language the text's script implies, then the
-  // page's declared language, then the browser's accept-language chain,
-  // then English, then any voice at all -- a voice in the wrong accent still
-  // beats silence. No single locale is hardcoded.
-  const prefs = [];
-  const want = t => {
-    t = String(t || '').slice(0, 2).toLowerCase();
-    if (t && !prefs.includes(t)) prefs.push(t);
-  };
-  want(_ttsScriptLang(text));
-  want(document.documentElement.lang);
-  (navigator.languages && navigator.languages.length
-    ? navigator.languages : [navigator.language]).forEach(want);
-  want('en');
-  // Neural/online voices first: the local fallbacks are markedly flatter.
-  // Note these are usually NOT local — Chrome's "Google …" and Edge's
-  // "… Online (Natural)" voices synthesize on the vendor's servers. No key
-  // and no cost to the player, but not offline. `v.localService === true`
-  // is the flag to rank on instead if on-device ever has to be the default.
-  const rank = v => /natural|online|neural/i.test(v.name) ? 0
-                  : /google/i.test(v.name) ? 1 : 2;
-  for (const p of prefs) {
-    const pool = voices.filter(v => (v.lang || '').toLowerCase().startsWith(p));
-    if (pool.length) return pool.sort((a, b) => rank(a) - rank(b))[0];
-  }
-  return voices.slice().sort((a, b) => rank(a) - rank(b))[0];
-}
-
-const _TTS_CHUNK_MAX = 220;
-
-function _ttsChunkText(text) {
-  // Short utterances avoid Chrome's ~15s cut-off on a single long speech.
-  // The terminator set carries CJK and Arabic/Armenian stops as well as the
-  // Latin ones: a Japanese paragraph contains no ".!?" at all, so a
-  // Latin-only split returns the whole paragraph as one chunk and walks
-  // straight into the cut-off this function exists to avoid.
-  const parts = text.match(/[^.!?…。！？؟։]+[.!?…。！？؟։]*["»”」』]?\s*/g) || [text];
-  const chunks = [];
-  let cur = '';
-  for (const part of parts) {
-    // A single sentence longer than the cap still has to be broken, or
-    // scripts that do not punctuate every 220 characters are back to one
-    // oversized utterance.
-    let p = part;
-    while (p.length > _TTS_CHUNK_MAX) {
-      if (cur) { chunks.push(cur.trim()); cur = ''; }
-      let cut = p.lastIndexOf(' ', _TTS_CHUNK_MAX);
-      if (cut < _TTS_CHUNK_MAX * 0.5) cut = _TTS_CHUNK_MAX;   // CJK has no spaces
-      chunks.push(p.slice(0, cut).trim());
-      p = p.slice(cut);
-    }
-    if ((cur + p).length > _TTS_CHUNK_MAX && cur) { chunks.push(cur.trim()); cur = ''; }
-    cur += p;
-  }
-  if (cur.trim()) chunks.push(cur.trim());
-  return chunks.filter(Boolean);
-}
-
-function _ttsBrowserSpeak(btn, text) {
-  speechSynthesis.cancel();
-  const voice = _ttsPickBrowserVoice(text);
-  const chunks = _ttsChunkText(text);
-  let last = null;
-  chunks.forEach(chunk => {
-    const u = new SpeechSynthesisUtterance(chunk);
-    // Leave lang unset when no voice matched: the browser default is a better
-    // guess than any locale this file could name.
-    if (voice) { u.voice = voice; u.lang = voice.lang; }
-    u.rate = 0.95;
-    speechSynthesis.speak(u);
-    last = u;
-  });
-  if (!last) return;
-
-  btn.innerHTML = _SVG_STOP;
-  btn.classList.remove('tts-loading');
-  btn.classList.add('tts-playing');
-  btn.setAttribute('aria-label', 'Stop narration');
-  _ttsActivePlayBtn = btn;
-  _ttsUtterance = last;
-
-  const done = () => {
-    if (_ttsUtterance !== last) return;      // a newer block took over
-    _ttsUtterance = null;
-    if (_ttsActivePlayBtn === btn) {
-      btn.innerHTML = _SVG_SPEAKER;
-      btn.classList.remove('tts-playing');
-      btn.setAttribute('aria-label', 'Listen to narration');
-      _ttsActivePlayBtn = null;
-    }
-  };
-  last.onend = done;
-  last.onerror = done;
-}
 
 function _getTtsCtx() {
   if (!_ttsCtx || _ttsCtx.state === 'closed') {
@@ -7396,10 +7256,6 @@ function _ttsStopActive() {
   if (_ttsActiveSource) {
     try { _ttsActiveSource.stop(); } catch (_) {}
     _ttsActiveSource = null;
-  }
-  if (_TTS_HAS_BROWSER && (_ttsUtterance || speechSynthesis.speaking || speechSynthesis.pending)) {
-    _ttsUtterance = null;
-    speechSynthesis.cancel();
   }
   if (_ttsActivePlayBtn) {
     _ttsActivePlayBtn.innerHTML = _SVG_SPEAKER;
@@ -7450,18 +7306,27 @@ function _ttsBlockVoice(blockEl) {
   return (blockEl && blockEl.dataset && blockEl.dataset.voice) || _ttsVoice;
 }
 
-// Gemini is out of quota (the free tier allows 10 voice requests a day): use
-// the browser's voice until it resets, and say so once rather than switching
-// voices without a word. Called from the server's broadcast and from a 429
-// reply, so a page opened after the quota ran out still knows.
+// Gemini is out of quota (the free tier allows 10 voice requests a day). The
+// server turns the voice off for every screen and says so with a `voice`
+// broadcast; this covers a page that only learns it from a 429 reply.
 function _ttsQuotaNotice(secs) {
   secs = Math.max(60, Number(secs) || 60);
-  _ttsRetryAt = Date.now() + secs * 1000; _ttsServerOk = false;   // until the quota resets
-  if (window._ttsQuotaNoted) return;
-  window._ttsQuotaNoted = true;
   const when = secs >= 5400 ? `about ${Math.round(secs / 3600)} h` : `about ${Math.round(secs / 60)} min`;
-  const why = secs >= 5400 ? "today's free Gemini voice quota is used up" : 'the Gemini voice is rate-limited';
-  if (typeof _showToast === 'function') _showToast(`Narration: ${why} — using this browser's voice for ${when}`, 9000);
+  _voiceSet(false, `the Gemini voice quota is used up — back in ${when}`);
+}
+
+// Apply the voice state. Off hides every play button, stops what is playing
+// and drops what was waiting; each change is announced once.
+function _voiceSet(on, reason) {
+  on = !!on; reason = on ? '' : String(reason || '');
+  const changed = on !== _voiceOn || reason !== _voiceReason;
+  _voiceOn = on; _voiceReason = reason;
+  document.body.classList.toggle('voice-off', !on);
+  if (!on) { _ttsAutoQueue.length = 0; _ttsStopActive(); }
+  _voiceRefreshRows();
+  if (changed && typeof _showToast === 'function') {
+    _showToast(on ? 'Narration voice is on' : `Narration voice is off: ${reason}. Text only.`, 7000);
+  }
 }
 
 function _ttsFetchPcm(text, voice) {
@@ -7477,7 +7342,7 @@ function _ttsFetchPcm(text, voice) {
 }
 
 function _ttsPrefetchBlock(blockEl) {
-  if (!blockEl || _ttsPrefetch.has(blockEl) || !_ttsServerUsable()) return;
+  if (!blockEl || _ttsPrefetch.has(blockEl) || !_voiceOn) return;
   const text = _ttsExtractText(blockEl);
   if (!text) return;
   const p = _ttsFetchPcm(text, _ttsBlockVoice(blockEl));
@@ -7513,7 +7378,7 @@ async function _ttsPlayBlock(btn, blockEl) {
   const text = _ttsExtractText(blockEl);
   if (!text) return;
 
-  if (!_ttsServerUsable() && _TTS_HAS_BROWSER) { _ttsBrowserSpeak(btn, text); return; }
+  if (!_voiceOn) return;
 
   const ctx = _getTtsCtx();
   const resumeP = ctx.state !== 'running' ? ctx.resume() : Promise.resolve();
@@ -7560,15 +7425,9 @@ async function _ttsPlayBlock(btn, blockEl) {
     };
     source.start(0);
   } catch (err) {
-    if (_ttsActivePlayBtn === btn && _TTS_HAS_BROWSER) {
-      // 503 means no key is configured, so stop asking the server at all.
-      // Anything else (429, 502, a dropped connection) is transient: fall
-      // back for this block and try the server again on the next one.
-      if (err.message === 'TTS 503') { _ttsServerOk = false; _ttsRetryAt = Date.now() + 60000; }
-      if (err.message === 'TTS 429') { _ttsServerOk = false; _ttsRetryAt = Math.max(_ttsRetryAt, Date.now() + 60000); }
-      _ttsBrowserSpeak(btn, text);
-      return;
-    }
+    // No second voice: after a 429 or 503 the server has turned the voice
+    // off and its broadcast hides the buttons; anything else (a dropped
+    // connection, a 502) shows on this button and the next block tries again.
     if (_ttsActivePlayBtn === btn) {
       const label = (err.message || 'ERR').slice(0, 12);
       btn.textContent = label;
@@ -7630,7 +7489,9 @@ function _ttsBuildVoiceMenu() {
 }
 
 function _addTtsBar(blockEl, opts) {
-  if (!_TTS_AVAILABLE || !blockEl) return;
+  // Every block gets a bar; body.voice-off hides them all, so they appear
+  // as soon as the voice comes back on.
+  if (!blockEl) return;
   const isReplay = !!(opts && opts.replay);
   if (blockEl.querySelector(':scope > .tts-bar')) return;  // already added
 
@@ -7663,7 +7524,7 @@ function _addTtsBar(blockEl, opts) {
   blockEl.appendChild(bar);
 
   // History replayed on page load or reconnect is never read aloud by itself.
-  if (_ttsAutoNarrate && !isReplay) {
+  if (_ttsAutoNarrate && !isReplay && _voiceOn) {
     // Defer one tick so the bar is in the DOM before triggering the click path
     setTimeout(() => _ttsAutoEnqueue(playBtn, blockEl), 0);
     _ttsShowAudioGate();
@@ -7676,7 +7537,7 @@ document.addEventListener('click', () => {
 
 // Browsers keep audio locked until someone touches the page. When narration
 // is about to play and the audio context is still locked, show one large
-// "Tap for audio" button; a tap unlocks both Web Audio and speech synthesis.
+// "Tap for audio" button; a tap unlocks Web Audio.
 function _ttsShowAudioGate() {
   if (document.getElementById('tts-audio-gate')) return;
   const ctx = _getTtsCtx();
@@ -7689,27 +7550,48 @@ function _ttsShowAudioGate() {
   b.addEventListener('click', ev => {
     ev.stopPropagation();
     ctx.resume().catch(() => {});
-    if (_TTS_HAS_BROWSER) {
-      try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (_) {}
-    }
     b.remove();
   });
   document.body.appendChild(b);
   ctx.resume().then(() => { if (ctx.state === 'running') b.remove(); }).catch(() => {});
 }
 
+// Settings rows show the voice state: the toggles when it is on, "Voice off"
+// with the reason in the row's title when it is not.
+function _voiceRefreshRows() {
+  const rows = [['narrate-row', 'narrate-label', () => _ttsAutoNarrate],
+                ['readall-row', 'readall-label', () => _ttsReadAll]];
+  rows.forEach(([rowId, labelId, get]) => {
+    const row = document.getElementById(rowId), label = document.getElementById(labelId);
+    if (!row || !label) return;
+    row.hidden = false;
+    row.classList.toggle('voice-unavailable', !_voiceOn);
+    if (!_voiceOn) {
+      label.textContent = 'Voice off';
+      label.classList.remove('on');
+      row.title = 'Narration voice is off: ' + (_voiceReason || 'not available') + '. Text only.';
+    } else {
+      label.textContent = get() ? 'On' : 'Off';
+      label.classList.toggle('on', get());
+      row.title = rowId === 'narrate-row' ? 'Auto-narrate new blocks in this browser only'
+                                          : 'Also read DM hints aloud (this browser only)';
+    }
+  });
+}
+function _voiceOffToast() {
+  _showToast('Narration voice is off: ' + (_voiceReason || 'not available') + '.', 5000);
+}
+
 // Read-hints row — tutor hints get a play bar too. Dice never do.
-if (_TTS_AVAILABLE) {
+{
   const raRow = document.getElementById('readall-row');
   const raLabel = document.getElementById('readall-label');
   if (raRow && raLabel) {
     raRow.hidden = false;
-    const refreshRa = () => {
-      raLabel.textContent = _ttsReadAll ? 'On' : 'Off';
-      raLabel.classList.toggle('on', _ttsReadAll);
-    };
+    const refreshRa = _voiceRefreshRows;
     refreshRa();
     raRow.addEventListener('click', () => {
+      if (!_voiceOn) { _voiceOffToast(); return; }
       _ttsReadAll = !_ttsReadAll;
       try { localStorage.setItem('dnd_tts_read_all', _ttsReadAll ? '1' : '0'); } catch (_) {}
       refreshRa();
@@ -7717,18 +7599,16 @@ if (_TTS_AVAILABLE) {
   }
 }
 
-// Auto-narrate row — only shown if the server reports TTS available.
-if (_TTS_AVAILABLE) {
+// Auto-narrate row.
+{
   const narrateRow = document.getElementById('narrate-row');
   const narrateLabel = document.getElementById('narrate-label');
   if (narrateRow && narrateLabel) {
     narrateRow.hidden = false;
-    const refresh = () => {
-      narrateLabel.textContent = _ttsAutoNarrate ? 'On' : 'Off';
-      narrateLabel.classList.toggle('on', _ttsAutoNarrate);
-    };
+    const refresh = _voiceRefreshRows;
     refresh();
     narrateRow.addEventListener('click', () => {
+      if (!_voiceOn) { _voiceOffToast(); return; }
       _ttsAutoNarrate = !_ttsAutoNarrate;
       localStorage.setItem('dnd_tts_auto', _ttsAutoNarrate ? '1' : '0');
       if (!_ttsAutoNarrate) _ttsAutoQueue.length = 0;   // turning it off drops what's waiting
@@ -7742,6 +7622,9 @@ if (_TTS_AVAILABLE) {
     });
   }
 }
+// The state the server rendered this page with; later changes arrive as `voice`.
+document.body.classList.toggle('voice-off', !_voiceOn);
+_voiceRefreshRows();
 
 // ═══════════════════════════════════════════════════════════════════
 // THEME PICKER (Dark / Light / Auto)
@@ -8760,7 +8643,7 @@ function connect() {
         }, 8000);
       }
     }
-    if (payload.tts_available) { _ttsServerOk = true; _ttsRetryAt = 0; }
+    if (payload.voice) _voiceSet(payload.voice.on, payload.voice.reason);
     if (payload.tts_quota) _ttsQuotaNotice(Number(payload.tts_quota.retry_after) || 60);
     if (payload.awaiting !== undefined) {
       _awaitingNames = payload.awaiting;

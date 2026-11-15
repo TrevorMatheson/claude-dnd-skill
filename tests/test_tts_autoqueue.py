@@ -9,7 +9,7 @@ burst every block cut off the one before it and the table only ever heard the
 last block. The auto-narrate queue makes each block wait until the previous
 one has finished (or failed, or been stopped by hand).
 
-Driven through node, like test_tts_fallback: the queue is timing behaviour, so
+Driven through node: the queue is timing behaviour, so
 "the function exists" proves nothing.
 """
 from __future__ import annotations
@@ -34,9 +34,9 @@ _SLICE = re.compile(r"(// Auto-narrate queue\..*?)\nfunction _ttsExtractText", r
 _HARNESS = """
 const log = [];
 let playing = 0, maxPlaying = 0;
-// Prefetch lives beside the queue; with the server marked unusable it is a no-op.
+// Prefetch lives beside the queue; with the voice marked off it is a no-op.
 const _ttsPrefetch = new WeakMap();
-const _ttsServerUsable = () => false;
+let _voiceOn = false;
 function makeBtn(name, ms, fail) {
   const cls = new Set();
   return { name, ms, fail,

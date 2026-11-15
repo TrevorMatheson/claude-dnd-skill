@@ -1242,7 +1242,8 @@ def index():
         "index.html",
         lan_token=_lan_token or "",
         narrator_voice=_read_narrator_voice(),
-        tts_available=(_tts is not None),
+        voice_on=_voice_payload()["on"],
+        voice_reason=_voice_payload()["reason"],
     )
 
 
@@ -1351,6 +1352,9 @@ def health():
         # Whether this server can use the voice key (never the key itself).
         "tts_key": bool(_tts is not None and _tts.key_source() != "unset"),
         "tts_quota_wait": max(0, int(_tts_quota_until - _time.time())),
+        # The one voice state every screen follows (see _voice_check).
+        "voice_on": _voice_payload()["on"],
+        "voice_reason": _voice_payload()["reason"],
     }, 200
 
 
@@ -2065,24 +2069,76 @@ def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
     return ""
 
 
-def _tts_key_watch(interval: float = 30.0) -> None:
-    """Announce a voice key that appears (or goes) while the server runs.
+# ─── Voice state: works fully or stays off ───────────────────────────────────
+# One answer for every screen: the Gemini voice is on, or it is off and says
+# why. There is no second, worse voice: the browser's speech synthesis read
+# narration in a flat robot voice whenever Gemini failed, which sounded broken
+# rather than off. The state is set by a check at start (which spends no
+# voice quota), by a quota reply mid-game, and by the key watcher below.
+_voice_lock = threading.Lock()
+_voice = {"on": False, "reason": "checking the voice…"}
+_voice_next_check = 0.0     # time.time() after which an "off" state is checked again
+_voice_key_fp = None        # fingerprint of the key last checked
 
-    tts.py reads the key on every request, so the server never needed a
-    restart for a new key — but the page stopped asking after a 503. A
-    `tts_available` broadcast tells open pages to try the server voice again.
-    """
+
+def _voice_payload() -> dict:
+    with _voice_lock:
+        return {"on": _voice["on"], "reason": _voice["reason"]}
+
+
+def _voice_set(on: bool, reason: str = "", recheck_in: float = 0.0) -> None:
+    """Set the voice state; tell every screen when it changes."""
+    global _voice_next_check
+    with _voice_lock:
+        changed = (_voice["on"] != on) or (_voice["reason"] != reason)
+        _voice["on"], _voice["reason"] = on, ("" if on else reason)
+        _voice_next_check = (_time.time() + recheck_in) if (not on and recheck_in) else 0.0
+    if changed:
+        _broadcast({"voice": _voice_payload()})
+
+
+def _voice_check() -> None:
+    """Work out whether the voice can run, and set the state from that."""
+    global _voice_key_fp
+    if _tts is None:
+        _voice_set(False, "the voice module didn't load")
+        return
+    try:
+        _voice_key_fp = _tts.key_fingerprint()
+    except Exception:
+        _voice_key_fp = ""
+    if not _voice_key_fp:
+        _voice_set(False, "no voice key is set up")
+        return
+    left = _tts_quota_until - _time.time()
+    if left > 0:
+        _voice_set(False, _quota_reason(left), recheck_in=left)
+        return
+    ok, why, retry = _tts.check_key()
+    _voice_set(ok, why, recheck_in=300.0 if retry else 0.0)
+
+
+def _quota_reason(secs: float) -> str:
+    secs = max(60, int(secs))
+    when = f"about {round(secs / 3600)} h" if secs >= 5400 else f"about {max(1, round(secs / 60))} min"
+    return f"the Gemini voice quota is used up — back in {when}"
+
+
+def _tts_key_watch(interval: float = 30.0) -> None:
+    """Check the voice at start, then again when the key changes or a
+    temporary failure (quota, network) has had time to clear."""
     import time as _t
-    last = None
+    _voice_check()
     while True:
-        try:
-            now = _tts is not None and _tts.key_source() != "unset"
-        except Exception:
-            now = False
-        if last is not None and now != last:
-            _broadcast({"tts_available": now})
-        last = now
         _t.sleep(interval)
+        try:
+            fp = _tts.key_fingerprint() if _tts is not None else ""
+        except Exception:
+            fp = ""
+        with _voice_lock:
+            due = (not _voice["on"]) and _voice_next_check and _time.time() >= _voice_next_check
+        if fp != _voice_key_fp or due:
+            _voice_check()
 
 
 def _read_narrator_voice() -> str:
@@ -2175,7 +2231,7 @@ def tts_synthesize():
     Body: {"text": str, "voice": str (optional)}
     Response: raw L16 PCM bytes, Content-Type: audio/L16;codec=pcm;rate=24000
     Failures: 503 (no key / module unavailable), 400 (bad input), 502 (upstream),
-    429 (Gemini quota used up — the page uses the browser voice until it resets)
+    429 (Gemini quota used up — the voice is off for every screen until it resets)
     """
     global _tts_quota_until
     if _tts is None:
@@ -2202,6 +2258,8 @@ def tts_synthesize():
             return _tts_quota_response()
         return Response(cached, mimetype="audio/L16;codec=pcm;rate=24000",
                         headers={"X-Audio-Voice": voice, "Cache-Control": "no-store"})
+    if not _voice_payload()["on"]:
+        return f"Voice is off: {_voice_payload()['reason']}", 503
     try:
         pcm = _tts.synthesize_strict(text, voice)
     except _tts.TtsError as e:
@@ -2213,6 +2271,7 @@ def tts_synthesize():
             _tts_quota_until = _time.time() + wait
             _broadcast({"tts_quota": {"daily": e.daily_quota, "retry_after": int(wait),
                                       "quota": e.quota_id}})
+            _voice_set(False, _quota_reason(wait), recheck_in=wait)
             return _tts_quota_response()
         return f"TTS upstream: {e}", 502
     return Response(
@@ -3022,8 +3081,8 @@ if __name__ == "__main__":
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)
-    if _tts is not None:
-        threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
+    # Always: with no module or no key it still sets the "off, because…" state.
+    threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
 
     # 127.0.0.1, not "localhost": say exactly which address is bound (the
     # scripts connect there; see display_url.py).

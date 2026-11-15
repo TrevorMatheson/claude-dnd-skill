@@ -110,8 +110,8 @@ def check_tts(results, health):
         return
     if src == "unset":
         _check(results, "voice key", WARN,
-               "no Gemini key — narration uses the browser's own voice",
-               f"put the key in {tts.KEY_FILE} (or set GEMINI_API_KEY) for the better voices")
+               "no Gemini key — narration is text only",
+               f"put the key in {tts.KEY_FILE} (or set GEMINI_API_KEY) to hear the narration")
     else:
         _check(results, "voice key", OK, f"found ({src.split(':')[0]})")
     if health is not None and "tts_key" in health:
@@ -119,16 +119,19 @@ def check_tts(results, health):
             _check(results, "display voice", WARN,
                    "the running display can't see the key (started with a different user or env)",
                    "restart the display from the same terminal")
+        elif "voice_on" in health and health["tts_key"] and not health["voice_on"]:
+            _check(results, "display voice", WARN,
+                   f"voice is off: {health.get('voice_reason') or 'unknown reason'} — text only",
+                   "check the key in Google AI Studio; the display re-checks when the key changes")
         else:
             _check(results, "display voice", OK,
-                   "the running display can use the key" if health["tts_key"] else "browser voice")
+                   "the running display can use the key" if health["tts_key"] else "text only")
         wait = int(health.get("tts_quota_wait") or 0)
         if wait:
             _check(results, "voice quota", WARN,
-                   f"Gemini quota used up — browser voice for about {max(1, round(wait / 3600))} h "
+                   f"Gemini quota used up — text only for about {max(1, round(wait / 3600))} h "
                    "(the free tier allows 10 voice requests a day; a turn uses 3–4)",
-                   "enable billing on the key's Google AI Studio project, or play the TV in "
-                   "Microsoft Edge, whose free 'Natural' voices are the best fallback")
+                   "enable billing on the key's Google AI Studio project for a higher limit")
 
 
 def check_display(results):
