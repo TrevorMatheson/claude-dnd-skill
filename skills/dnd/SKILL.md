@@ -306,11 +306,13 @@ Read `## Campaign Arc` at every session load alongside `## DM Style Notes`. The 
 **Player input queue (display companion):**
 At the start of each turn, run `check_input.py` before processing the player's message. If it prints output, use those queued actions as part of (or all of) the player's action this turn. Empty output means no queued input — proceed normally. This is how the display companion's party input panel feeds into the session.
 
+**Phone rolls arrive here too.** A line like `[Havoc]: rolled Stealth (1d20+4): 17, natural 13, vs DC 12 - PASS` is a die the player rolled on their phone. Apply it to the roll you called for and carry on — do not ask for it again and do not re-roll it. `(not asked for)` at the end means the player rolled without a request: use it if it fits what they are doing, otherwise mention it in a word and move on. These lines appear whenever no `send.py --wait` was alive to receive the roll (it timed out, was cut off, or was never run), so a roll is never lost — it just comes in through the inbox.
+
 A line wrapped in double brackets — e.g. `[[Narration length for this turn: aim for ~250 words…]]` — is **not** a player action; it is a directive from the display's Narration slider. Treat it as a hard length budget for **this turn's** narration: write to roughly that word count, trimming description and pacing to fit, and never pad to reach it. The remaining `[Char]: …` lines are the actual player actions. (If the only thing returned is the `[[…]]` directive with no action lines, treat it as no player input.)
 
 **Autorun / taxi mode** (`autorun: true` in `state.md → ## Session Flags`):
 
-When autorun is active, Claude drives the turn loop — no DM Enter required and no PTY wrapper needed. After completing each response, run this blocking wait as the very last Bash call of the response. The CLI shows the command text in the `⏺ Bash(...)` label — the comment on line 1 is what the DM sees while it blocks.
+When autorun is active, Claude drives the turn loop — no DM Enter required and no PTY wrapper needed. After completing each response, run this blocking wait as the very last Bash call of the response. The CLI shows the command text in the `⏺ Bash(...)` label — the comment on line 1 is what the DM sees while it blocks. **Give the Bash call `timeout: 600000`** (10 minutes): Claude Code stops a command after 2 minutes by default, which kills the wait mid-turn and leaves the table stuck.
 
 ```bash
 # Autorun wait — Ctrl+C to return to manual mode
@@ -318,13 +320,13 @@ AUTORUN=$(python3 ${CLAUDE_SKILL_DIR}/display/autorun_wait.py)
 echo "$AUTORUN"
 ```
 
-- If `AUTORUN` is non-empty: treat it as the player action for the next turn. Process immediately — no DM message needed. The content has already been sanitised by dnd-display-app.py before being written to the queue.
+- If `AUTORUN` is non-empty: treat it as the player action for the next turn. Process immediately — no DM message needed. The content has already been sanitised by dnd-display-app.py before being written to the queue. It may hold `[Name]: rolled …` lines — phone rolls (see *Phone rolls arrive here too* above).
 - If `AUTORUN` is empty (timeout after 9 min): **silently restart the wait** — do not print anything, do not wait for a DM message. Just run the same Bash block again immediately. This keeps the loop alive indefinitely until a player submits or the DM intervenes.
 - If the DM sends a message mid-wait: the Bash is interrupted. **Before processing the DM's message, run `check_input.py` once.** If it returns content, that is queued player input that arrived during the gap — treat it as part of this turn alongside the DM's message (or as the primary action if the DM message is administrative). If it returns empty, proceed with the DM's message as the turn input. After resolving the DM's turn, restart the wait if `autorun: true` is still in state.md.
 
 Autorun security model: device approval in dnd-display-app.py gates who can write to the queue. Content is validated (character allowlist, structural format, printable ASCII, shell metachar strip) before being written. The Bash loop reads the pre-sanitised file — it does not execute it.
 
-Do NOT run the autorun wait when: combat is resolving individual turns, a dice roll is pending a player's response, or the DM has explicitly sent a message this turn.
+Do NOT run the autorun wait when: combat is resolving individual turns, or the DM has explicitly sent a message this turn. A pending dice roll is fine — the roll arrives through this wait as a `[Name]: rolled …` line.
 
 **Dice convention — who rolls (read `roll_mode` and obey it):**
 
@@ -333,7 +335,7 @@ Roll handling is chosen at game start and stored as `roll_mode` in `state.md →
 - **`roll_mode: players` (default) — players roll their own PCs.** For *any* PC d20 (attack, skill/ability check, save, death save), **call for the roll by name and STOP — wait for the player's result before resolving.** Do **not** roll it for them. ⚠ **Never fall back to `dice.py` or an `[auto]` result for a PC** just because the physical-dice phone server isn't running — if no roll comes back, ask the player for the number out loud. You roll **only** NPC/monster dice. (This is a hard constraint: silently auto-rolling a PC is the #1 thing players notice and dislike.)
   - **Prescribe the roll through the display when it's running** (`_display_running = true`): call
     `python3 ${CLAUDE_SKILL_DIR}/display/send.py --dice-request --character "<PC>" --spec 1dN [--modifier ±M] [--advantage advantage|disadvantage] [--label "<check>"] [--dc N] --wait`.
-    The roll routes to that PC's **phone** if one is bound, or **auto-opens the on-screen Dice drawer** on the shared screen when no phone is bound (or the display's *Roll on screen* setting is on) — the same roller either way. `--wait` blocks until the player rolls and then prints one line per roller — `Havoc: 17 (natural 14, +3) vs DC 12 — PASS`, with `[physical die]` when they rolled a real die and typed the face — or one JSON object with `--json`. It waits up to 10 minutes (`--wait-timeout N`) and exits non-zero on timeout — fall back to asking out loud. When the display is **not** running, just call for the roll verbally and wait. Never roll the PC yourself under `players`.
+    The roll routes to that PC's **phone** if one is bound, or **auto-opens the on-screen Dice drawer** on the shared screen when no phone is bound (or the display's *Roll on screen* setting is on) — the same roller either way. `--wait` blocks until the player rolls and then prints one line per roller — `Havoc: 17 (natural 14, +3) vs DC 12 — PASS`, with `[physical die]` when they rolled a real die and typed the face — or one JSON object with `--json`. **Run it with the Bash `timeout: 600000`** (Claude Code's default 2 minutes kills it while the player is still deciding). It waits up to 9 minutes (`--wait-timeout N`); on timeout it prints the rolls that did arrive and exits 2. **A timed-out or cut-off wait loses nothing:** do not re-roll and do not ask again — run `autorun_wait.py` (same 10-minute Bash timeout) or `check_input.py`, and the roll comes in as a `[Name]: rolled …` line once the player rolls. Never end your response with a roll you called for and no wait running, unless the DM is at the keyboard to nudge you. When the display is **not** running, just call for the roll verbally and wait. Never roll the PC yourself under `players`.
 - **`roll_mode: auto` — you roll everything openly.** Resolve PC d20s yourself via `dice.py` and show full math inline (`Piper — Perception: d20+5 = 18 → …`), no waiting. For solo / fast play.
 
 **Initiative** is always DM-rolled via `combat.py init` for all combatants (PCs and NPCs) regardless of `roll_mode`.

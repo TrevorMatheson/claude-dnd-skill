@@ -134,12 +134,17 @@ class TestAwaiting(_Base):
 
     def setUp(self):
         super().setUp()
-        self._qpatch = mock.patch.object(self.app, "QUEUE_FILE",
-                                         str(pathlib.Path(self.app.rt("x")).parent / ".input_queue_test"))
+        self._qfile = pathlib.Path(self.app.rt("x")).parent / ".input_queue_test"
+        # The DM inbox appends (a roll may already be waiting there), so each
+        # test starts from an empty one.
+        self._qfile.unlink(missing_ok=True)
+        self.app._queue_status.clear()
+        self._qpatch = mock.patch.object(self.app, "QUEUE_FILE", str(self._qfile))
         self._qpatch.start()
 
     def tearDown(self):
         self._qpatch.stop()
+        self._qfile.unlink(missing_ok=True)
         super().tearDown()
 
     def _queued(self):

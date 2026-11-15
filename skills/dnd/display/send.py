@@ -435,8 +435,13 @@ def _print_dice_results(request_id: str, st: dict, as_json: bool) -> None:
         print(" ".join(bits), flush=True)
 
 
+# Claude Code stops a command after at most 10 minutes; the wait ends a minute
+# before that so it can report what it has instead of being killed silently.
+DEFAULT_WAIT = 540
+
+
 def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None, dc=None,
-                 wait=False, wait_timeout=600, as_json=False) -> int:
+                 wait=False, wait_timeout=DEFAULT_WAIT, as_json=False) -> int:
     """POST a dice request to the phones / on-screen roller; optionally wait.
 
     Prints the request id first (callers correlate on it), then, with `wait`,
@@ -501,8 +506,20 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
             print(f"send.py: still waiting on: {', '.join(remaining)}", file=sys.stderr)
             last_pending = list(remaining)
         time.sleep(0.5)
+    # Give up, but hand over what did arrive (and tell the display so those
+    # rolls are not delivered a second time through the inbox).
+    try:
+        sreq = urllib.request.Request(status_url + "?delivered=1", headers=poll_headers, method="GET")
+        st = json.loads(urllib.request.urlopen(sreq, timeout=TIMEOUT, context=_SSL_CTX)
+                        .read().decode("utf-8") or "{}")
+        if st.get("results"):
+            _print_dice_results(request_id, st, as_json)
+    except Exception:
+        pass
     print(f"send.py: timeout after {wait_timeout}s — still pending: "
-          f"{', '.join(last_pending)}", file=sys.stderr)
+          f"{', '.join(last_pending)}. Their rolls are not lost: when they roll, the result "
+          f"arrives as a '[Name]: rolled …' line from autorun_wait.py / check_input.py.",
+          file=sys.stderr)
     return 2
 
 
@@ -700,7 +717,7 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
             chars = [c.strip() for c in chars.split(",") if c.strip()] or ["any"]
         return dice_request(chars, dr.get("spec", "1d20"), int(dr.get("modifier", 0)),
                             dr.get("advantage", "normal"), dr.get("label"), dr.get("dc"),
-                            wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", 600)),
+                            wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", DEFAULT_WAIT)),
                             as_json=as_json)
     return 0
 
@@ -771,9 +788,10 @@ def main() -> None:
              '(polls /dice-request/<id>). Exits non-zero on timeout.')
     parser.add_argument("--json", action="store_true",
         help="With --wait: print the results as one JSON object on stdout.")
-    parser.add_argument("--wait-timeout", type=int, default=600, metavar="SECONDS",
-        help='Timeout for --wait (default 600s — a real table is slow). On timeout, prints still-pending '
-             'characters to stderr and exits 2.')
+    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_WAIT, metavar="SECONDS",
+        help='Timeout for --wait (default 540s — under Claude Code\'s 10-minute command limit). On timeout, '
+             'prints the rolls that did arrive, names who is still pending on stderr and exits 2; '
+             'later rolls arrive through autorun_wait.py / check_input.py.')
 
     # ── Stat-change flags (Option B — bundled with narration) ─────────────────
     parser.add_argument("--stat-hp", action="append", metavar="NAME:CUR:MAX",

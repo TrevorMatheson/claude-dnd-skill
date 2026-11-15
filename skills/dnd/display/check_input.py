@@ -61,6 +61,30 @@ def _roll_directives():
     return ""
 
 
+def _mark_consumed():
+    """Tell the display the DM has the queued moves and rolls, so every screen
+    stops showing them as waiting (autorun_wait.py does the same)."""
+    try:
+        import ssl
+        import urllib.request
+        here = os.path.dirname(os.path.abspath(__file__))
+        scheme_file = os.path.join(here, ".scheme")
+        scheme = open(scheme_file, encoding="utf-8").read().strip() if os.path.exists(scheme_file) else "http"
+        tok_file = rt(".token")
+        token = open(tok_file, encoding="utf-8").read().strip() if os.path.exists(tok_file) else ""
+        ctx = None
+        if scheme == "https":
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        base = os.environ.get("DND_DISPLAY_URL", "").strip().rstrip("/") or f"{scheme}://127.0.0.1:5001"
+        req = urllib.request.Request(base + "/queue/consumed", data=b"", method="POST",
+                                     headers={"X-DND-Token": token})
+        urllib.request.urlopen(req, timeout=1, context=ctx)
+    except Exception:
+        pass
+
+
 try:
     if os.path.exists(QUEUE_FILE):
         with open(QUEUE_FILE, encoding="utf-8") as f:
@@ -71,5 +95,6 @@ try:
                 if d:
                     print(d)
             print(content)
+            _mark_consumed()
 except Exception:
     pass

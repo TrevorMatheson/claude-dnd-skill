@@ -428,17 +428,74 @@ def _check_auto_trigger() -> None:
         for c in taken:
             _staged.pop(c, None)
 
-    try:
-        with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-            f.write(content)
-    except Exception:
+    if not _queue_append(content):
         char_names = []
 
     if char_names:
         with _queue_status_lock:
-            _queue_status.clear()
-            _queue_status.extend(char_names)
-    _broadcast({"staged_inputs": {}, "queue_status": list(char_names)})
+            for c in char_names:
+                if c not in _queue_status:
+                    _queue_status.append(c)
+    _broadcast({"staged_inputs": {}, "queue_status": list(_queue_status)})
+
+
+# The DM's inbox. Player moves and phone rolls both land here; whatever the DM
+# runs next (autorun_wait.py, check_input.py) reads it and clears it. Appending
+# matters: a roll written while the DM was not waiting must survive the moves
+# that arrive after it, and vice versa.
+_queue_file_lock = threading.Lock()
+
+
+def _queue_append(content: str) -> bool:
+    content = (content or "").strip("\n")
+    if not content:
+        return True
+    with _queue_file_lock:
+        try:
+            prev = ""
+            if os.path.exists(QUEUE_FILE):
+                with open(QUEUE_FILE, encoding="utf-8") as f:
+                    prev = f.read().rstrip("\n")
+            if not prev:
+                # The inbox was read (and deleted) since the last write, so
+                # whoever was listed as queued has been delivered.
+                with _queue_status_lock:
+                    _queue_status.clear()
+            with open(QUEUE_FILE, "w", encoding="utf-8") as f:
+                f.write((prev + "\n" + content) if prev else content)
+            return True
+        except Exception:
+            return False
+
+
+# A `send.py --wait` polls /dice-request/<id> about once a second. If it has
+# polled within this window, it is alive and will hand the roll to the DM;
+# otherwise (cut off by a command timeout, never started, already gave up)
+# the roll goes to the DM's inbox instead of being lost.
+_DICE_WAITER_ALIVE = 6.0
+
+
+def _roll_line(character: str, label: str, spec: str, mod_str: str, total: int,
+               natural, dc, physical: bool, asked: bool) -> str:
+    what = label or f"{spec}{mod_str}"
+    bits = [f"{total}"]
+    if natural is not None:
+        bits.append(f"natural {natural}")
+    if isinstance(dc, int):
+        bits.append(f"vs DC {dc} - {'PASS' if total >= dc else 'FAIL'}")
+    if physical:
+        bits.append("physical die")
+    tail = "" if asked else " (not asked for)"
+    return f"[{character}]: rolled {what} ({spec}{mod_str}): " + ", ".join(bits) + tail
+
+
+def _queue_roll_for_dm(line: str, character: str) -> None:
+    if _queue_append(line):
+        with _queue_status_lock:
+            if character not in _queue_status:
+                _queue_status.append(character)
+            snap = list(_queue_status)
+        _broadcast({"queue_status": snap})
 
 
 def _token_ok() -> bool:
@@ -2522,6 +2579,9 @@ def player_dice():
     # Correlate against any pending DM request. Case-insensitive match on the
     # character name — drop them from the request's expected-rollers set.
     pending_changed = False
+    nat = kept[0] if spec == "1d20" else None
+    to_queue: list = []       # lines for the DM's inbox (no live waiter to hand them over)
+    asked = False             # this roll answered a DM request
     if req_id:
         with _dice_pending_lock:
             entry = _dice_pending.get(req_id)
@@ -2529,20 +2589,41 @@ def player_dice():
                 ci = character.lower()
                 matched = next((c for c in entry["chars"] if c.lower() == ci), None)
                 if matched is not None:
+                    asked = True
+                    waiter_alive = (_time.time() - entry.get("polled_at", 0.0)) < _DICE_WAITER_ALIVE
                     entry["chars"].discard(matched)
                     dc_v = entry["meta"].get("dc")
                     entry.setdefault("results", []).append({
                         "character": matched, "rolls": both or rolls, "kept": kept,
                         "modifier": modifier, "total": total, "physical": physical,
-                        "natural": kept[0] if spec == "1d20" else None,
+                        "natural": nat,
                         "success": (total >= dc_v) if isinstance(dc_v, int) else None,
                         "text": text,
+                        "dm_line": _roll_line(matched, label or entry["meta"].get("label", ""), spec,
+                                              mod_str, total, nat, dc_v, physical, True),
+                        "queued": False,
                     })
+                    if not waiter_alive:
+                        # Nobody is polling: this roll, and any earlier one of the
+                        # same request that a now-dead wait never printed.
+                        for r in entry["results"]:
+                            if not r.get("queued"):
+                                to_queue.append(r["dm_line"])
+                                r["queued"] = True
                     pending_changed = True
                     if not entry["chars"]:
                         _dice_finish(req_id, entry)
     if pending_changed:
         _broadcast({"dice_pending": _dice_pending_snapshot()})
+
+    # A roll nobody asked for, or one whose DM wait was cut off, goes to the
+    # DM's inbox, so the next autorun_wait / check_input delivers it and the
+    # game moves on instead of the roll sitting on the TV unseen.
+    if not asked:
+        to_queue.append(_roll_line(character, label, spec, mod_str, total, nat,
+                                   None, physical, False))
+    if to_queue:
+        _queue_roll_for_dm("\n".join(to_queue), character)
 
     return jsonify({
         "character": character,
@@ -2647,18 +2728,30 @@ def dice_request_status(request_id):
     """
     if not _token_ok():
         return "Forbidden", 403
+    # ?delivered=1: the caller (send.py --wait giving up) is printing these
+    # results now, so they must not also go to the DM's inbox later.
+    delivered = request.args.get("delivered") == "1"
+
+    def _public(results):
+        if delivered:
+            for r in results:
+                r["queued"] = True
+        return [{k: v for k, v in r.items() if k not in ("dm_line", "queued")} for r in results]
+
     with _dice_pending_lock:
         entry = _dice_pending.get(request_id)
+        if entry is not None:
+            entry["polled_at"] = _time.time()
         if entry is None or not entry["chars"]:
             done = _dice_done.get(request_id) or {}
             meta = done.get("meta") or {}
             return jsonify({"complete": True, "pending": [],
-                            "results": done.get("results", []),
+                            "results": _public(done.get("results", [])),
                             "label": meta.get("label", ""), "dc": meta.get("dc")}), 200
         return jsonify({
             "complete": False,
             "pending": sorted(entry["chars"]),
-            "results": list(entry.get("results", [])),
+            "results": _public(entry.get("results", [])),
             "label": entry["meta"].get("label", ""),
             "dc": entry["meta"].get("dc"),
             "started_at": entry["started_at"],
