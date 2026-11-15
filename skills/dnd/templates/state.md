@@ -169,7 +169,7 @@ revision_log: []
 ## Session Flags
 *(tutor_mode, autorun, autorun_interval, tts_voice, tutor_voice, sfx_languages, autosave — session-scoped flags set via /dnd commands or by the display companion)*
 *(tutor_voice: a read-aloud voice for DM hints, different from tts_voice — e.g. `tutor_voice: Zephyr`. NPC voices live on each NPC's **Voice:** line in npcs.md.)*
-*(narrator: crawler|classic — default crawler: the sardonic PG-13 announcer voice in SKILL.md "The Narrator's Voice". classic = straight dark-fantasy narration, no system notices.)*
+*(story_tone: crawler|classic — default crawler: the darkly funny PG-13 dungeon-crawl world in SKILL.md "Story Tone". classic = the tone comes only from the campaign's Tone/Genre choice.)*
 *(autosave: on|off — default on. Governs the behind-the-scenes continuity checkpoint (Live State Flags + graph + session tail). Toggle with /dm:dnd autosave on|off.)*
 
 ## DM Notes (hidden from players)
