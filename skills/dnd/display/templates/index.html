@@ -3844,6 +3844,247 @@
     background:var(--e-accent, #FF7A2D); color:var(--e-dice-text, #14110C); border-color:var(--e-accent, #FF7A2D); }
   body.input-only #phone-status.ps-sending{ opacity:.8; }
   body.input-only #phone-status.ps-resolving{ color:var(--e-accent, #FF7A2D); }
+
+  /* ══ Phone look: Claude desktop palette ══════════════════════════════
+     One block that restyles the whole phone view in both skins. Dark is the
+     Claude app's dark mode; data-theme="light" swaps in its light mode.
+     `.input-only.input-only` lifts these rules above the skin rules. */
+  body.input-only {
+    --c-bg: #262624; --c-bg2: #1f1e1d; --c-surface: #30302e; --c-raised: #3a3a37;
+    --c-line: rgba(222,220,209,.13); --c-line2: rgba(222,220,209,.26);
+    --c-text: #faf9f5; --c-text2: #c2c0b6; --c-mute: #9c9a92;
+    --c-accent: #d97757; --c-accent-hi: #e08a6d; --c-on-accent: #ffffff;
+    --c-accent-soft: rgba(217,119,87,.16); --c-good: #7cb17c; --c-warn: #d9a548; --c-bad: #d96a5b;
+    --c-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --c-serif: "Newsreader", ui-serif, Georgia, "Times New Roman", serif;
+    --c-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* Hand the same colors to the variables the older phone pieces read. */
+    --ps-ink: var(--c-text); --ps-dim: var(--c-mute); --ps-line: var(--c-line);
+    --ps-card: var(--c-surface); --ps-accent: var(--c-accent); --ps-on-accent: var(--c-on-accent); --ps-bg: var(--c-bg);
+    --e-canvas: var(--c-bg); --e-strong: var(--c-surface); --e-on-strong: var(--c-text);
+    --e-hair-strong: var(--c-line2); --e-accent: var(--c-accent); --e-dice-text: var(--c-on-accent);
+    --e-ink: var(--c-text); --e-mut: var(--c-mute);
+  }
+  :root[data-theme="light"] body.input-only {
+    --c-bg: #faf9f5; --c-bg2: #f0eee6; --c-surface: #ffffff; --c-raised: #f5f4ed;
+    --c-line: rgba(31,30,29,.12); --c-line2: rgba(31,30,29,.24);
+    --c-text: #141413; --c-text2: #3d3d3a; --c-mute: #73726c;
+    --c-accent: #c6613f; --c-accent-hi: #d97757; --c-accent-soft: rgba(198,97,63,.12);
+    --c-good: #3f8a4a; --c-warn: #a97a1c; --c-bad: #b8473a;
+  }
+  :root body.input-only.input-only { background: var(--c-bg) !important; color: var(--c-text); font-family: var(--c-sans); }
+  :root body.input-only.input-only #sky,
+  :root body.input-only.input-only #particles { display: none !important; }
+  :root body.input-only.input-only #input-panel { background: var(--c-bg) !important; box-shadow: none !important; }
+  :root body.input-only.input-only #input-body { background: transparent !important; gap: 0; }
+
+  /* Top tab bar */
+  :root body.input-only.input-only #dp-tabs {
+    background: var(--c-bg2) !important; border-bottom: 1px solid var(--c-line) !important;
+    padding: 6px 60px 6px 8px !important; gap: 4px !important; position: sticky; top: 0; z-index: 5;
+  }
+  :root body.input-only.input-only .dp-tab {
+    font: 600 15px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-mute) !important; background: transparent !important; border: 0 !important;
+    border-radius: 10px !important; padding: 12px 6px !important; min-height: 44px !important; opacity: 1 !important;
+  }
+  :root body.input-only.input-only .dp-tab.active { color: var(--c-text) !important; background: var(--c-surface) !important; box-shadow: inset 0 0 0 1px var(--c-line); }
+  :root body.input-only.input-only .dp-tab:active { background: var(--c-raised) !important; }
+  :root body.input-only.input-only .dp-tab.has-request::after { background: var(--c-accent) !important; box-shadow: 0 0 0 3px var(--c-accent-soft) !important; }
+
+  /* Settings gear and its menu */
+  :root body.input-only.input-only #phone-settings { top: calc(env(safe-area-inset-top) + 8px); right: calc(env(safe-area-inset-right) + 8px); }
+  :root body.input-only.input-only #ph-set-toggle {
+    width: 44px; height: 44px; border-radius: 10px; background: transparent !important;
+    color: var(--c-text2) !important; border: 1px solid var(--c-line) !important; font-size: 18px;
+  }
+  :root body.input-only.input-only #ph-set-menu {
+    background: var(--c-surface) !important; border: 1px solid var(--c-line2) !important; border-radius: 12px !important;
+    box-shadow: 0 16px 40px rgba(0,0,0,.45) !important; min-width: 220px; padding: 4px;
+  }
+  :root body.input-only.input-only .ph-set-opt {
+    font: 500 14px/1.2 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-text) !important; border: 0 !important; border-radius: 8px; padding: 13px 12px !important;
+  }
+  :root body.input-only.input-only .ph-set-opt:active { background: var(--c-raised) !important; }
+  :root body.input-only.input-only .ph-set-opt strong,
+  :root body.input-only.input-only .ph-set-select {
+    color: var(--c-mute) !important; font: 500 14px/1.2 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+  }
+  :root body.input-only.input-only .ph-set-select option { background: var(--c-surface); color: var(--c-text); font-family: var(--c-sans); }
+
+  /* Turn status card */
+  :root body.input-only.input-only #phone-status {
+    margin: 14px 14px 10px !important; padding: 14px 16px !important; border-radius: 14px !important;
+    font: 500 15px/1.4 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    background: var(--c-surface) !important; color: var(--c-text) !important; border: 1px solid var(--c-line) !important;
+  }
+  :root body.input-only.input-only #phone-status.ps-sent { background: var(--c-accent-soft) !important; border-color: var(--c-accent) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only #phone-status.ps-resolving { color: var(--c-accent-hi) !important; }
+
+  /* Move tab: who's acting, the text box, and the send button */
+  :root body.input-only.input-only #char-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px; margin: 0 0 4px; border: 0 !important; background: none !important; }
+  :root body.input-only.input-only .char-tab {
+    font: 500 13px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-text2) !important; background: var(--c-surface) !important; border: 1px solid var(--c-line) !important;
+    border-radius: 999px !important; padding: 8px 13px !important; min-height: 34px; opacity: 1 !important;
+  }
+  :root body.input-only.input-only .char-tab.active { color: var(--c-text) !important; background: var(--c-accent-soft) !important; border-color: var(--c-accent) !important; }
+  :root body.input-only.input-only #player-input-text {
+    font: 400 16px/1.5 var(--c-sans) !important; color: var(--c-text) !important;
+    background: var(--c-surface) !important; border: 1px solid var(--c-line2) !important; border-radius: 16px !important;
+    margin: 10px 14px !important; padding: 14px 16px !important; box-shadow: 0 1px 2px rgba(0,0,0,.18) !important; outline: none;
+    width: auto !important; box-sizing: border-box !important; align-self: stretch;
+    caret-color: var(--c-accent);
+  }
+  :root body.input-only.input-only #player-input-text::placeholder { color: var(--c-mute) !important; font-style: normal !important; opacity: 1; }
+  :root body.input-only.input-only #player-input-text:focus { border-color: var(--c-line2) !important; box-shadow: 0 0 0 3px var(--c-accent-soft) !important; }
+  :root body.input-only.input-only #input-footer { padding: 0 14px 18px !important; gap: 10px; background: none !important; border: 0 !important; }
+  :root body.input-only.input-only #stage-btn {
+    font: 600 16px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    background: var(--c-accent) !important; color: var(--c-on-accent) !important; border: 0 !important;
+    border-radius: 12px !important; min-height: 48px !important; padding: 14px 26px !important; box-shadow: none !important; text-shadow: none !important;
+  }
+  :root body.input-only.input-only #stage-btn:active { background: var(--c-accent-hi) !important; }
+  :root body.input-only.input-only #stage-btn:disabled { opacity: .45; }
+  :root body.input-only.input-only #skip-turn-btn {
+    font: 500 14px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-text2) !important; background: transparent !important; border: 1px solid var(--c-line2) !important;
+    border-radius: 12px !important; min-height: 48px; padding: 12px 16px !important;
+  }
+  :root body.input-only.input-only #staged-queue { padding: 0 14px; gap: 8px; }
+  :root body.input-only.input-only .staged-entry {
+    background: var(--c-surface) !important; border: 1px solid var(--c-line) !important; border-left: 3px solid var(--c-line2) !important;
+    border-radius: 12px !important; padding: 10px 12px !important;
+  }
+  :root body.input-only.input-only .staged-entry.is-ready { border-left-color: var(--c-good) !important; }
+  :root body.input-only.input-only .staged-char { font: 600 12px/1.2 var(--c-sans) !important; letter-spacing: 0 !important; color: var(--c-mute) !important; text-transform: none !important; }
+  :root body.input-only.input-only .staged-text { font: 400 15px/1.4 var(--c-sans) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only .ready-btn,
+  :root body.input-only.input-only .skip-btn {
+    font: 500 12px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-text2) !important; background: transparent !important; border: 1px solid var(--c-line2) !important;
+    border-radius: 8px !important; padding: 8px 11px !important;
+  }
+  :root body.input-only.input-only .ready-btn.is-ready { color: var(--c-good) !important; border-color: var(--c-good) !important; }
+  :root body.input-only.input-only .unstage-btn { color: var(--c-mute) !important; font-size: 14px !important; }
+  :root body.input-only.input-only #waiting-indicator,
+  :root body.input-only.input-only #waiting-indicator .queue-label { font: 500 13px/1.4 var(--c-sans) !important; letter-spacing: 0 !important; color: var(--c-mute) !important; }
+  :root body.input-only.input-only #waiting-indicator .queue-check { font: 500 13px/1.4 var(--c-sans) !important; letter-spacing: 0 !important; color: var(--c-good) !important; }
+
+  /* Roll tab */
+  :root body.input-only.input-only #dice-pad { background: transparent !important; border: 0 !important; padding: 14px 14px 20px !important; gap: 12px !important; }
+  :root body.input-only.input-only #dp-bound { font: 600 13px/1.3 var(--c-sans) !important; letter-spacing: .02em !important; text-transform: none !important; color: var(--c-mute) !important; opacity: 1; }
+  :root body.input-only.input-only #dp-bound .req { font: 500 15px/1.35 var(--c-sans) !important; color: var(--c-accent-hi) !important; }
+  :root body.input-only.input-only #dice-pad #dp-name,
+  :root body.input-only.input-only #dice-pad #dp-label,
+  :root body.input-only.input-only #dp-phys {
+    font: 400 16px/1.2 var(--c-sans) !important; color: var(--c-text) !important; background: var(--c-surface) !important;
+    border: 1px solid var(--c-line2) !important; border-radius: 12px !important; padding: 11px 13px !important; box-shadow: none !important;
+  }
+  :root body.input-only.input-only #dice-pad #dp-name { font-weight: 600 !important; width: 150px; }
+  :root body.input-only.input-only #dice-pad #dp-label::placeholder,
+  :root body.input-only.input-only #dp-phys::placeholder { color: var(--c-mute) !important; }
+  :root body.input-only.input-only #dp-reel-wrap {
+    height: 96px; background: var(--c-bg2) !important; border: 1px solid var(--c-line) !important;
+    border-radius: 18px !important; box-shadow: none !important;
+  }
+  :root body.input-only.input-only #dp-reel-wrap::before { background: linear-gradient(180deg, var(--c-bg2), transparent) !important; }
+  :root body.input-only.input-only #dp-reel-wrap::after { background: linear-gradient(0deg, var(--c-bg2), transparent) !important; }
+  :root body.input-only.input-only #dp-reel { font: 600 50px/1 var(--c-sans) !important; color: var(--c-text) !important; text-shadow: none !important; font-variant-numeric: tabular-nums; }
+  :root body.input-only.input-only #dp-result-line { font: 400 14px/1.4 var(--c-sans) !important; color: var(--c-text2) !important; }
+  :root body.input-only.input-only #dp-result-line .total { color: var(--c-accent-hi) !important; font-size: 17px !important; font-weight: 700 !important; }
+  :root body.input-only.input-only #dice-pad .dp-row { gap: 8px !important; }
+  :root body.input-only.input-only #dice-pad .dp-die,
+  :root body.input-only.input-only #dice-pad .dp-adv,
+  :root body.input-only.input-only #dice-pad .dp-mod {
+    font: 600 15px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-text) !important; background: var(--c-surface) !important; border: 1px solid var(--c-line) !important;
+    border-radius: 12px !important; min-height: 46px; box-shadow: none !important; text-shadow: none !important;
+  }
+  :root body.input-only.input-only #dice-pad .dp-die { min-width: 60px; }
+  :root body.input-only.input-only #dice-pad .dp-die.active,
+  :root body.input-only.input-only #dice-pad .dp-adv.active { background: var(--c-accent-soft) !important; border-color: var(--c-accent) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only #dice-pad .dp-die:active,
+  :root body.input-only.input-only #dice-pad .dp-adv:active,
+  :root body.input-only.input-only #dice-pad .dp-mod:active { background: var(--c-raised) !important; }
+  :root body.input-only.input-only #dice-pad .dp-mod { min-width: 46px; border-radius: 50% !important; padding: 0 !important; width: 46px; }
+  :root body.input-only.input-only #dice-pad #dp-mod-val { font: 600 18px/1 var(--c-sans) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only #dice-pad #dp-roll {
+    font: 600 17px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-on-accent) !important; background: var(--c-accent) !important; border: 0 !important;
+    border-radius: 14px !important; min-height: 52px; box-shadow: none !important; text-shadow: none !important;
+  }
+  :root body.input-only.input-only #dice-pad #dp-roll:active { background: var(--c-accent-hi) !important; }
+  :root body.input-only.input-only #dp-phys-send {
+    font: 600 15px/1 var(--c-sans) !important; color: var(--c-text) !important; background: var(--c-raised) !important;
+    border: 1px solid var(--c-line2) !important; border-radius: 12px !important; padding: 11px 18px !important;
+  }
+  :root body.input-only.input-only #dp-hint,
+  :root body.input-only.input-only #dp-phys-hint { font: 400 13px/1.4 var(--c-sans) !important; color: var(--c-mute) !important; opacity: 1 !important; }
+  /* Mod row text label ("Mod") reads in the pad's own colour */
+  :root body.input-only.input-only #dice-pad { color: var(--c-text2); font-family: var(--c-sans); }
+
+  /* Sheet tab */
+  :root body.input-only.input-only #character-pane { background: transparent !important; padding: 16px 14px 28px !important; }
+  :root body.input-only.input-only #cp-status { font: 400 13px/1.4 var(--c-sans) !important; color: var(--c-mute) !important; letter-spacing: 0 !important; text-transform: none !important; }
+  :root body.input-only.input-only #cp-body.ps { background: transparent !important; border: 0 !important; box-shadow: none !important; font-family: var(--c-sans) !important; color: var(--c-text); }
+  :root body.input-only.input-only #cp-body.ps .ps-name { font: 600 26px/1.15 var(--c-serif) !important; color: var(--c-text) !important; letter-spacing: 0 !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-ident { font: 400 14px/1.3 var(--c-sans) !important; color: var(--c-mute) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-box { background: var(--c-surface) !important; border: 1px solid var(--c-line) !important; border-radius: 14px !important; font-family: var(--c-sans) !important; }
+  :root body.input-only.input-only #cp-body.ps button.ps-box:active { background: var(--c-raised) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-box .ps-lbl { font: 600 10.5px/1.2 var(--c-sans) !important; letter-spacing: .06em !important; color: var(--c-mute) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-box .ps-val { font-family: var(--c-sans) !important; color: var(--c-text) !important; font-variant-numeric: tabular-nums; }
+  :root body.input-only.input-only #cp-body.ps .ps-hpbar { background: var(--c-raised) !important; height: 5px; border-radius: 3px; }
+  :root body.input-only.input-only #cp-body.ps .ps-save { border-radius: 10px !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-save.prof { border-color: var(--c-accent) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-tabs { background: var(--c-bg) !important; border-bottom: 1px solid var(--c-line) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-tab { font: 500 14px/1 var(--c-sans) !important; letter-spacing: 0 !important; color: var(--c-mute) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-tab.active { color: var(--c-text) !important; border-bottom-color: var(--c-accent) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-row { border-bottom: 1px solid var(--c-line) !important; color: var(--c-text) !important; font-family: var(--c-sans) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-roll {
+    font: 600 14px/1 var(--c-sans) !important; color: var(--c-text) !important; background: var(--c-surface) !important;
+    border: 1px solid var(--c-line2) !important; border-radius: 10px !important; font-variant-numeric: tabular-nums;
+  }
+  :root body.input-only.input-only #cp-body.ps .ps-roll:active { background: var(--c-accent-soft) !important; border-color: var(--c-accent) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-roll.dmg { border-style: dashed !important; color: var(--c-text2) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-md,
+  :root body.input-only.input-only #cp-body.ps .ps-md p,
+  :root body.input-only.input-only #cp-body.ps .ps-md li { font-family: var(--c-sans) !important; color: var(--c-text2) !important; line-height: 1.5; }
+  :root body.input-only.input-only #cp-body.ps .ps-md strong { color: var(--c-text) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-md h3 { font: 600 15px/1.3 var(--c-sans) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only #cp-body.ps .ps-md li::before { color: var(--c-mute) !important; }
+  /* Plain-markdown fallback sheet (a sheet the tabbed view can't parse) */
+  :root body.input-only.input-only #cp-body:not(.ps) { font-family: var(--c-sans); color: var(--c-text2); }
+  :root body.input-only.input-only #cp-body:not(.ps) h1,
+  :root body.input-only.input-only #cp-body:not(.ps) h2,
+  :root body.input-only.input-only #cp-body:not(.ps) h3 { font-family: var(--c-sans) !important; color: var(--c-text) !important; letter-spacing: 0 !important; text-transform: none !important; border-color: var(--c-line) !important; }
+  :root body.input-only.input-only #cp-body:not(.ps) p,
+  :root body.input-only.input-only #cp-body:not(.ps) li,
+  :root body.input-only.input-only #cp-body:not(.ps) td { color: var(--c-text2) !important; font-family: var(--c-sans) !important; }
+  :root body.input-only.input-only #cp-body:not(.ps) strong,
+  :root body.input-only.input-only #cp-body:not(.ps) th { color: var(--c-text) !important; }
+  :root body.input-only.input-only #cp-body:not(.ps) th,
+  :root body.input-only.input-only #cp-body:not(.ps) td { border-color: var(--c-line) !important; }
+
+  /* Battle map on the phone */
+  :root body.input-only.input-only #battle-map { background: var(--c-bg2) !important; border: 1px solid var(--c-line) !important; border-radius: 14px !important; margin: 10px 14px 0; overflow: hidden; box-shadow: none !important; }
+  :root body.input-only.input-only #battle-map .bm-head { font: 600 13px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--c-text2) !important; background: var(--c-surface) !important; border-bottom: 1px solid var(--c-line) !important; }
+
+  /* Character picker, toast, back-to-TV link */
+  :root body.input-only.input-only #cs-kicker { font: 600 12px/1.2 var(--c-sans) !important; letter-spacing: .08em !important; color: var(--c-accent-hi) !important; }
+  :root body.input-only.input-only #cs-title { font: 500 30px/1.15 var(--c-serif) !important; font-style: normal !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only .cs-opt { font: 600 17px/1.2 var(--c-sans) !important; letter-spacing: 0 !important; border-radius: 14px !important; border-color: var(--c-line) !important; }
+  :root body.input-only.input-only .cs-opt:active { background: var(--c-accent-soft) !important; border-color: var(--c-accent) !important; color: var(--c-text) !important; }
+  :root body.input-only.input-only #cs-back,
+  :root body.input-only.input-only #cs-skip { font: 500 14px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important; }
+  :root body.input-only.input-only #toast { font: 500 14px/1.35 var(--c-sans) !important; letter-spacing: 0 !important; border-radius: 12px !important; border-left-width: 1px !important; border-color: var(--c-line2) !important; }
+  :root body.input-only.input-only #full-mode-btn {
+    font: 500 12px/1 var(--c-sans) !important; letter-spacing: 0 !important; text-transform: none !important;
+    color: var(--c-mute) !important; background: var(--c-bg2) !important; border: 1px solid var(--c-line) !important;
+    border-radius: 8px !important; padding: 7px 10px !important; opacity: .85 !important;
+  }
+  :root body.input-only.input-only #input-body { scrollbar-width: thin; scrollbar-color: var(--c-line2) transparent; padding-bottom: 52px !important; }
 </style>
 </head>
 <body>

@@ -24,6 +24,7 @@ From the first live table test (see `docs/ROADMAP.md`).
 **TV and phone**
 - The TV no longer shows a typing box (players act from their phones, the DM from the terminal). The TV has two side panels, and Settings → Left panel / Right panel picks what each shows: Party, Turn order and the Battle map (by default Party and Turn order on the left, the map small in the right panel). A panel holding the map widens to fit it, a panel scrolls when its contents do not fit, and with Party on both sides a player pushed with "side": "right" sits on the right.
 - The phone Sheet tab is laid out like D&D Beyond: HP, AC, initiative and speed on top, the six abilities with their saves, then Actions, Skills, Spells, Inventory, Features and Notes tabs. Tapping an attack, damage, check, save or initiative fills in the Roll tab and opens it. A sheet not laid out like the template still shows as plain text.
+- The phone view uses the Claude desktop app's colours in both skins: warm charcoal in dark mode, cream in light mode, clay-orange for the main buttons and anything selected, and a plain sans-serif. The tabs, Roll pad, sheet, settings menu and character picker all follow it, and the starfield behind the phone is gone.
 
 **Narration**
 - Rolls are shown, never spoken: dice blocks no longer get a play bar (the setting is now "Read hints aloud"), and roll mechanics written inline in narration, such as "(d20+5 = 17)" or "[18 vs AC 15]", are left out of the voice.
