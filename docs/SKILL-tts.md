@@ -4,6 +4,22 @@ The display companion can read narrator and NPC blocks aloud via Google's Gemini
 
 If you skip this guide, the display still renders text exactly as it does today — no audio, no warnings, no behavior change.
 
+## Local narrator voice (Kokoro) — recommended
+
+Gemini's free tier allows only 10 voice requests a day, which a couple of turns use up. Kokoro is a small text-to-speech model that runs on your own computer, free and unlimited. With it installed:
+
+- **Kokoro reads the narration**, sentence by sentence, and the TV types each sentence at the speed it's spoken. The first sentence starts in about 0.3 s on an NVIDIA GPU (about 0.7 s on the CPU).
+- **Gemini reads NPC lines.** When Gemini fails or runs out of quota, a matching Kokoro voice reads the line instead, so the voice never drops out.
+- The narrator defaults to **Lewis** (British man). Pick another in any block's **Voices** menu: 28 English voices, British and American.
+
+One-time install (separate Python environment, ~330 MB model; with an NVIDIA GPU it also installs the CUDA build, a few GB):
+
+```bash
+python skills/dnd/display/kokoro_setup.py
+```
+
+The display then starts the voice by itself (`kokoro_server.py`, localhost port 5002) and stops it when the display stops. It uses the GPU when it can and the CPU otherwise. `python skills/dnd/display/kokoro_setup.py --check` reports whether it's installed and running; the helper's log is `skills/dnd/display/kokoro.log`.
+
 ## What you get
 
 - A speaker button at the bottom of every narrator and NPC block. Click to hear that block read aloud.

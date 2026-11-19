@@ -91,6 +91,13 @@ try:
             content = f.read().strip()
         os.remove(QUEUE_FILE)
         if content:
+            try:
+                import rewind
+                note = rewind.take_note(os.path.dirname(QUEUE_FILE))
+                if note:
+                    print(note)
+            except Exception:
+                pass
             for d in (_roll_directives(), _narration_directive()):
                 if d:
                     print(d)

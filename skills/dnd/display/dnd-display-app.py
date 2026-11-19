@@ -84,6 +84,12 @@ try:
 except Exception:
     _tts = None   # type: ignore
 
+# Undo the last turn (snapshots taken when player actions reach the DM).
+try:
+    import rewind as _rewind
+except Exception:
+    _rewind = None   # type: ignore
+
 # Speech-to-text for "pass the mic" — local faster-whisper; off (with a
 # reason) when it is not installed. See stt.py.
 try:
@@ -175,11 +181,11 @@ _RATE_WINDOW = 60    # seconds
 _RATE_MAX    = 20    # requests per window per IP
 
 
-def _rate_ok(ip: str) -> bool:
+def _rate_ok(ip: str, limit: int = 0) -> bool:
     now = _time.time()
     with _rate_lock:
         bucket = [t for t in _rate_buckets.get(ip, []) if now - t < _RATE_WINDOW]
-        if len(bucket) >= _RATE_MAX:
+        if len(bucket) >= (limit or _RATE_MAX):
             return False
         bucket.append(now)
         _rate_buckets[ip] = bucket
@@ -428,6 +434,7 @@ def _check_auto_trigger() -> None:
                 return
             taken = list(_staged.keys())
         char_names = taken
+        inputs     = [(c, _staged[c]["text"]) for c in taken]
         lines      = [f'[{c}]: {_staged[c]["text"]}' for c in taken]
         content    = "\n".join(lines)
         for c in taken:
@@ -435,6 +442,8 @@ def _check_auto_trigger() -> None:
 
     if not _queue_append(content):
         char_names = []
+    if char_names:
+        _rewind_mark(inputs)
 
     if char_names:
         with _queue_status_lock:
@@ -1424,6 +1433,7 @@ def health():
         # The one voice state every screen follows (see _voice_check).
         "voice_on": _voice_payload()["on"],
         "voice_reason": _voice_payload()["reason"],
+        "kokoro": {"on": _kokoro_ok, "provider": _kokoro_info.get("provider", "")},
         "mic": _mic_payload(),
     }, 200
 
@@ -2021,7 +2031,13 @@ def roll_pref():
 # Voice selection persists per-campaign in state.md → ## Session Flags →
 # `tts_voice: <name>`. Read at /index render, written by POST /voice.
 
-_VOICE_PAT = re.compile(r"^\s*tts_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
+_VOICE_PAT = re.compile(r"^\s*tts_voice:\s*([A-Za-z_]+)\s*$", re.MULTILINE)
+
+
+def _valid_voice(v: str) -> bool:
+    """A Gemini or a local Kokoro voice name."""
+    f = getattr(_tts, "valid_voice", None)
+    return f(v) if f else v in _tts.VALID_VOICES
 
 
 def _clean_map(m):
@@ -2084,8 +2100,8 @@ def _active_campaign_name() -> Optional[str]:
         return None
 
 
-_NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z]+)", re.IGNORECASE | re.MULTILINE)
-_TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z]+)\s*$", re.MULTILINE)
+_NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z_]+)", re.IGNORECASE | re.MULTILINE)
+_TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z_]+)\s*$", re.MULTILINE)
 _npc_voice_cache: dict = {}   # (campaign, mtime) -> {npc name lower: voice}
 
 
@@ -2110,7 +2126,7 @@ def _npc_voices(campaign: str) -> dict:
     for sec in re.split(r"^###\s+", text, flags=re.MULTILINE)[1:]:
         name, _, body = sec.partition("\n")
         m = _NPC_VOICE_PAT.search(body)
-        if m and _tts is not None and m.group(1) in _tts.VALID_VOICES:
+        if m and _tts is not None and _valid_voice(m.group(1)):
             voices[name.strip().lower()] = m.group(1)
     _npc_voice_cache.clear()
     _npc_voice_cache[key] = voices
@@ -2122,7 +2138,7 @@ def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
     if _tts is None:
         return ""
     v = str(data.get("voice") or "").strip()
-    if v in _tts.VALID_VOICES:
+    if _valid_voice(v):
         return v
     name = _active_campaign_name()
     if not name:
@@ -2135,19 +2151,26 @@ def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
         except (OSError, ValueError, TypeError):
             return ""
         m = _TUTOR_VOICE_PAT.search(st)
-        return m.group(1) if m and m.group(1) in _tts.VALID_VOICES else ""
+        return m.group(1) if m and _valid_voice(m.group(1)) else ""
     return ""
 
 
 # ─── Voice state: works fully or stays off ───────────────────────────────────
-# One answer for every screen: the Gemini voice is on, or it is off and says
-# why. There is no second, worse voice: the browser's speech synthesis read
-# narration in a flat robot voice whenever Gemini failed, which sounded broken
-# rather than off. The state is set by a check at start (which spends no
-# voice quota), by a quota reply mid-game, and by the key watcher below.
+# One answer for every screen: the voice is on, or it is off and says why.
+# There is no browser speech-synthesis fallback: it read narration in a flat
+# robot voice whenever Gemini failed, which sounded broken rather than off.
+#
+# Two engines feed it. Kokoro (local, kokoro_server.py) reads the narration
+# and stands in for Gemini when Gemini can't speak; Gemini voices NPC lines.
+# The voice is on while either works. _voice_set records Gemini's own state
+# (set by a check at start that spends no quota, by a quota reply mid-game and
+# by the key watcher); _kokoro_ok is kept current by _kokoro_supervise.
 _voice_lock = threading.Lock()
 _voice = {"on": False, "reason": "checking the voice…"}
-_voice_next_check = 0.0     # time.time() after which an "off" state is checked again
+_gemini_state = {"on": False, "reason": "checking the voice…"}
+_kokoro_ok = False          # the local Kokoro helper answers /health
+_kokoro_info: dict = {}     # its last /health reply (provider: cuda | cpu)
+_voice_next_check = 0.0     # time.time() after which Gemini is checked again
 _voice_key_fp = None        # fingerprint of the key last checked
 
 
@@ -2156,15 +2179,82 @@ def _voice_payload() -> dict:
         return {"on": _voice["on"], "reason": _voice["reason"]}
 
 
-def _voice_set(on: bool, reason: str = "", recheck_in: float = 0.0) -> None:
-    """Set the voice state; tell every screen when it changes."""
-    global _voice_next_check
+def _voice_publish() -> None:
+    """Combine both engines into the one state; tell every screen on change."""
+    on = bool(_gemini_state["on"] or _kokoro_ok)
+    reason = "" if on else _gemini_state["reason"]
     with _voice_lock:
         changed = (_voice["on"] != on) or (_voice["reason"] != reason)
-        _voice["on"], _voice["reason"] = on, ("" if on else reason)
-        _voice_next_check = (_time.time() + recheck_in) if (not on and recheck_in) else 0.0
+        _voice["on"], _voice["reason"] = on, reason
     if changed:
         _broadcast({"voice": _voice_payload()})
+
+
+def _voice_set(on: bool, reason: str = "", recheck_in: float = 0.0) -> None:
+    """Record whether Gemini can speak, then publish the combined state."""
+    global _voice_next_check
+    _gemini_state["on"], _gemini_state["reason"] = on, ("" if on else reason)
+    _voice_next_check = (_time.time() + recheck_in) if (not on and recheck_in) else 0.0
+    _voice_publish()
+
+
+def _kokoro_set(ok: bool, info: Optional[dict] = None) -> None:
+    global _kokoro_ok, _kokoro_info
+    _kokoro_info = dict(info or {})
+    if ok != _kokoro_ok:
+        _kokoro_ok = ok
+        _voice_publish()
+
+
+def _kokoro_supervise() -> None:
+    """Keep the local Kokoro voice running for as long as the display runs.
+
+    Starts kokoro_server.py in Kokoro's own Python environment when it's
+    installed and not already answering, restarts it if it dies (backing off
+    after repeated failures), and keeps _kokoro_ok current. The helper is
+    given this process's pid and exits by itself when the display stops."""
+    import subprocess as _sp
+    import time as _t
+    if _tts is None or not hasattr(_tts, "kokoro_installed"):
+        return
+    proc, fails = None, 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        h = _tts.kokoro_health()
+        if h:
+            _kokoro_set(True, h)
+            fails = 0
+            _t.sleep(10)
+            continue
+        _kokoro_set(False)
+        if not _tts.kokoro_installed():
+            _t.sleep(60)
+            continue
+        if proc is not None and proc.poll() is None:
+            _t.sleep(2)        # still loading the model
+            continue
+        if fails >= 5:
+            _t.sleep(300)
+            fails = 0
+        fails += 1
+        kw = {}
+        if os.name == "nt":
+            kw["creationflags"] = _sp.CREATE_NO_WINDOW
+        try:
+            log = open(os.path.join(here, "kokoro.log"), "a", encoding="utf-8")
+            proc = _sp.Popen([str(_tts.kokoro_python()), os.path.join(here, "kokoro_server.py"),
+                              "--port", str(_tts.KOKORO_PORT), "--models", str(_tts.kokoro_models()),
+                              "--parent-pid", str(os.getpid())],
+                             stdout=log, stderr=_sp.STDOUT, stdin=_sp.DEVNULL, cwd=here, **kw)
+        except OSError as e:
+            print(f"[kokoro] could not start the local voice: {e}", file=sys.stderr)
+            proc = None
+            _t.sleep(30)
+            continue
+        for _ in range(120):          # the model loads in a few seconds
+            _t.sleep(1)
+            if _tts.kokoro_health() or proc.poll() is not None:
+                break
 
 
 def _voice_check() -> None:
@@ -2215,26 +2305,31 @@ def _read_narrator_voice() -> str:
     """Return the active campaign's tts_voice, or the module default."""
     if _tts is None:
         return ""
+    local = getattr(_tts, "kokoro_installed", lambda: False)()
+    default = _tts.DEFAULT_NARRATOR if local else _tts.DEFAULT_VOICE
     name = _active_campaign_name()
     if not name:
-        return _tts.DEFAULT_VOICE
+        return default
     try:
         state = _find_campaign(name) / "state.md"
         if not state.exists():
-            return _tts.DEFAULT_VOICE
+            return default
         text = state.read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
-        return _tts.DEFAULT_VOICE
+        return default
     m = _VOICE_PAT.search(text)
-    if not m:
-        return _tts.DEFAULT_VOICE
-    v = m.group(1).strip()
-    return v if v in _tts.VALID_VOICES else _tts.DEFAULT_VOICE
+    v = m.group(1).strip() if m else ""
+    # Kokoro reads the narration when it's installed: a saved Gemini narrator
+    # is from before that, so it gives way to the local default (Lewis).
+    if local:
+        return v if _tts.is_kokoro(v) else default
+    return v if _valid_voice(v) else default
 
 
 def _write_narrator_voice(voice: str) -> bool:
     """Persist tts_voice to the active campaign's state.md → ## Session Flags."""
-    if _tts is None or voice not in _tts.VALID_VOICES:
+    ok_voice = getattr(_tts, "valid_voice", None)
+    if _tts is None or not (ok_voice(voice) if ok_voice else voice in _tts.VALID_VOICES):
         return False
     name = _active_campaign_name()
     if not name:
@@ -2296,63 +2391,101 @@ def _tts_quota_response():
 
 @app.route("/tts", methods=["POST"])
 def tts_synthesize():
-    """Synthesize a narrator/NPC block to L16 PCM.
+    """Synthesize a narrator/NPC line to L16 PCM.
 
-    Body: {"text": str, "voice": str (optional)}
-    Response: raw L16 PCM bytes, Content-Type: audio/L16;codec=pcm;rate=24000
-    Failures: 503 (no key / module unavailable), 400 (bad input), 502 (upstream),
-    429 (Gemini quota used up — the voice is off for every screen until it resets)
+    Body: {"text": str, "voice": str (optional), "speed": float (optional)}
+    Response: raw L16 PCM bytes, Content-Type: audio/L16;codec=pcm;rate=24000;
+    X-Audio-Engine says who spoke (kokoro | gemini).
+
+    A Kokoro voice (narration) is read locally. A Gemini voice (an NPC) goes
+    to Gemini; when Gemini fails or is out of quota and Kokoro is running, a
+    matching Kokoro voice reads the line instead, so the table never loses
+    the voice to Gemini's 10-a-day free quota.
+    Failures: 503 (voice off / module unavailable), 400 (bad input), 502
+    (upstream, no stand-in), 429 (Gemini quota used up and no local voice).
     """
     global _tts_quota_until
     if _tts is None:
         return "TTS module unavailable", 503
     if not _token_ok():
         return "Forbidden", 403
-    if not _rate_ok(request.remote_addr or "?"):
-        return "Rate limited", 429
     data = request.get_json(silent=True) or {}
     text = (data.get("text") or "").strip()
-    voice = (data.get("voice") or _tts.DEFAULT_VOICE).strip()
+    voice = (data.get("voice") or "").strip() or _read_narrator_voice() or _tts.DEFAULT_VOICE
+    # The local narrator is read a sentence at a time (a long turn is 20+
+    # requests a minute) and costs nothing, so it has its own, larger bucket.
+    local_req = getattr(_tts, "is_kokoro", lambda v: False)(voice) and _kokoro_ok
+    ip = request.remote_addr or "?"
+    if not (_rate_ok(ip + "|local", 600) if local_req else _rate_ok(ip)):
+        return "Rate limited", 429
+    try:
+        speed = max(0.5, min(2.0, float(data.get("speed") or 1.0)))
+    except (TypeError, ValueError):
+        speed = 1.0
     if not text:
         return "empty text", 400
     if len(text) > _tts.MAX_TEXT_CHARS:
         text = text[: _tts.MAX_TEXT_CHARS]
-    if voice not in _tts.VALID_VOICES:
+    if not _valid_voice(voice):
         voice = _tts.DEFAULT_VOICE
-    if _tts.key_source() == "unset":
-        return "TTS not configured (see docs/SKILL-tts.md)", 503
+
+    def _pcm(pcm, engine, used):
+        return Response(pcm, mimetype="audio/L16;codec=pcm;rate=24000",
+                        headers={"X-Audio-Chars": str(len(text)), "X-Audio-Voice": used,
+                                 "X-Audio-Engine": engine, "Cache-Control": "no-store"})
+
+    def _local(v):
+        return _pcm(_tts.kokoro_synthesize(text, v, speed=speed), "kokoro", _tts.kokoro_standin(v))
+
+    is_local = getattr(_tts, "is_kokoro", lambda v: False)(voice)
+    if is_local:
+        if _kokoro_ok:
+            try:
+                return _local(voice)
+            except _tts.TtsError as e:
+                return f"Local voice failed: {e}", 502
+        # Kokoro is down: read the narration with Gemini while it can.
+        voice = _tts.DEFAULT_VOICE
+
+    # ── Gemini ──
     if _time.time() < _tts_quota_until:
         # A cached clip still plays: only a new line would hit the quota.
         cached = _tts.cache_get(_tts.cache_key(voice, text))
-        if cached is None:
-            return _tts_quota_response()
-        return Response(cached, mimetype="audio/L16;codec=pcm;rate=24000",
-                        headers={"X-Audio-Voice": voice, "Cache-Control": "no-store"})
+        if cached is not None:
+            return _pcm(cached, "gemini", voice)
+        if _kokoro_ok:
+            return _local(voice)
+        return _tts_quota_response()
     if not _voice_payload()["on"]:
         return f"Voice is off: {_voice_payload()['reason']}", 503
+    if _kokoro_ok and (_tts.key_source() == "unset" or not _gemini_state["on"]):
+        return _local(voice)
+    if _tts.key_source() == "unset":
+        return "TTS not configured (see docs/SKILL-tts.md)", 503
     try:
-        pcm = _tts.synthesize_strict(text, voice)
+        # With a local stand-in ready, don't keep the table waiting on Gemini.
+        kw = {"timeout": 12.0} if _kokoro_ok else {}
+        pcm = _tts.synthesize_strict(text, voice, **kw)
     except _tts.TtsError as e:
         if getattr(e, "status", 0) == 429:
             # Out of Gemini quota. The free tier allows 10 voice requests a
             # day for this model, so a few turns use it up. Stop calling
-            # until it resets, and tell every screen once.
+            # until it resets.
             wait = e.retry_after or (3600 if e.daily_quota else 60)
             _tts_quota_until = _time.time() + wait
+            if _kokoro_ok:
+                global _voice_next_check
+                _gemini_state["on"], _gemini_state["reason"] = False, _quota_reason(wait)
+                _voice_next_check = _time.time() + wait
+                return _local(voice)
             _broadcast({"tts_quota": {"daily": e.daily_quota, "retry_after": int(wait),
                                       "quota": e.quota_id}})
             _voice_set(False, _quota_reason(wait), recheck_in=wait)
             return _tts_quota_response()
+        if _kokoro_ok:
+            return _local(voice)
         return f"TTS upstream: {e}", 502
-    return Response(
-        pcm,
-        mimetype="audio/L16;codec=pcm;rate=24000",
-        headers={
-            "X-Audio-Chars": str(len(text)),
-            "X-Audio-Voice": voice,
-            "Cache-Control": "no-store",
-        },
-    )
+    return _pcm(pcm, "gemini", voice)
 
 
 @app.route("/voice", methods=["POST"])
@@ -2368,7 +2501,7 @@ def tts_voice():
         return "Forbidden", 403
     data = request.get_json(silent=True) or {}
     voice = (data.get("voice") or "").strip()
-    if voice not in _tts.VALID_VOICES:
+    if not _valid_voice(voice):
         return jsonify({"error": "invalid voice"}), 400
     ok = _write_narrator_voice(voice)
     return jsonify({"voice": voice, "persisted": ok}), 200
@@ -3143,6 +3276,74 @@ def skip_input():
     return "", 204
 
 
+def _rewind_mark(inputs: list) -> None:
+    """Snapshot the moment these player actions reach the DM (see rewind.py)."""
+    camp = _active_campaign_name()
+    if _rewind is None or not camp:
+        return
+    try:
+        with _text_log_lock:
+            log = list(_text_log)
+        with _tail_lock:
+            tail = list(_tail_buffer)
+        with _stats_lock:
+            stats = json.loads(json.dumps(_current_stats))
+        _rewind.snapshot(os.path.dirname(QUEUE_FILE), camp, _find_campaign(camp), inputs,
+                         {"log": log, "tail": tail, "stats": stats})
+    except Exception as e:   # a failed snapshot must never block the turn
+        print(f"[rewind] snapshot failed: {e}", file=sys.stderr)
+
+
+@app.route("/rewind", methods=["POST"])
+def rewind_turn():
+    """Undo the last turn: campaign files, TV feed and sidebar go back to the
+    moment the last player actions reached the DM. The DM is told with a note
+    in front of the next input; those players' phones get their old action
+    back in the input box to correct and resend."""
+    global _current_stats
+    if not _token_ok():
+        return "Forbidden", 403
+    camp = _active_campaign_name()
+    if _rewind is None or not camp:
+        return jsonify({"error": "no campaign is running"}), 404
+    snap, meta = _rewind.latest(os.path.dirname(QUEUE_FILE), camp)
+    if snap is None:
+        return jsonify({"error": "there's no turn to rewind"}), 404
+    try:
+        state = _rewind.restore(snap, _find_campaign(camp))
+    except Exception as e:
+        return jsonify({"error": f"rewind failed: {e}"}), 500
+    with _text_log_lock:
+        _text_log.clear()
+        _text_log.extend(state.get("log") or [])
+    _persist_log()
+    with _tail_lock:
+        _tail_buffer.clear()
+        _tail_buffer.extend(state.get("tail") or [])
+    _persist_tail()
+    with _stats_lock:
+        _current_stats = state.get("stats") or {}
+    _persist_stats()
+    # Moves and rolls sent for the undone turn go with it.
+    with _queue_file_lock:
+        try:
+            os.remove(QUEUE_FILE)
+        except OSError:
+            pass
+    with _queue_status_lock:
+        _queue_status.clear()
+    with _dice_pending_lock:
+        _dice_pending.clear()
+    _rewind.write_note(os.path.dirname(QUEUE_FILE), _rewind.dm_note(meta))
+    with _text_log_lock:
+        recent = list(_text_log)[-200:]
+    with _stats_lock:
+        stats = dict(_current_stats)
+    _broadcast({"queue_status": [], "dice_pending": {}})
+    _broadcast({"rewind": {"inputs": meta.get("inputs", []), "log": recent, "stats": stats}})
+    return jsonify({"ok": True, "inputs": meta.get("inputs", [])}), 200
+
+
 @app.route("/queue/consumed", methods=["POST"])
 def queue_consumed():
     """Called by wrapper.py after it injects .input_queue into the PTY.
@@ -3332,6 +3533,7 @@ if __name__ == "__main__":
         _audio.set_broadcast(_broadcast)
     # Always: with no module or no key it still sets the "off, because…" state.
     threading.Thread(target=_tts_key_watch, daemon=True, name="tts-key-watch").start()
+    threading.Thread(target=_kokoro_supervise, daemon=True, name="kokoro").start()
     threading.Thread(target=_stt_start, daemon=True, name="stt-load").start()
 
     # 127.0.0.1, not "localhost": say exactly which address is bound (the

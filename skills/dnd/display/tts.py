@@ -55,7 +55,7 @@ MAX_TEXT_CHARS = 2000
 
 # Request timeout — Gemini Flash TTS typical latency is 1-3s; we give it
 # substantial headroom for cold-start or transient slowness.
-DEFAULT_TIMEOUT = 30.0
+DEFAULT_TIMEOUT = 90.0
 
 
 # ── Clip cache ──────────────────────────────────────────────────────────────
@@ -337,6 +337,119 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE) -> Optional[bytes]:
         return synthesize_strict(text, voice)
     except TtsError:
         return None
+
+
+# ── Kokoro (local narrator voice) ───────────────────────────────────────────
+#
+# Kokoro runs on this machine in its own Python environment (kokoro_server.py,
+# set up by kokoro_setup.py), so the narrator never spends Gemini quota — the
+# free tier allows 10 Gemini voice requests a day. The display reads narration
+# with a Kokoro voice and keeps Gemini for NPC lines; when Gemini fails or is
+# out of quota, an NPC line is read by a matching Kokoro voice instead.
+
+KOKORO_PORT = int(os.environ.get("DND_KOKORO_PORT", "5002"))
+KOKORO_URL = os.environ.get("DND_KOKORO_URL", f"http://127.0.0.1:{KOKORO_PORT}")
+KOKORO_MODEL = "kokoro-v1.0"
+
+# English Kokoro voices: id -> label shown in the voice menu.
+KOKORO_VOICES = {
+    "bm_lewis": "Lewis", "bm_george": "George", "bm_fable": "Fable", "bm_daniel": "Daniel",
+    "bf_emma": "Emma", "bf_isabella": "Isabella", "bf_alice": "Alice", "bf_lily": "Lily",
+    "am_michael": "Michael", "am_fenrir": "Fenrir", "am_adam": "Adam", "am_echo": "Echo",
+    "am_eric": "Eric", "am_liam": "Liam", "am_onyx": "Onyx", "am_puck": "Puck", "am_santa": "Santa",
+    "af_heart": "Heart", "af_bella": "Bella", "af_nicole": "Nicole", "af_aoede": "Aoede",
+    "af_kore": "Kore", "af_sarah": "Sarah", "af_nova": "Nova", "af_sky": "Sky",
+    "af_alloy": "Alloy", "af_jessica": "Jessica", "af_river": "River",
+}
+DEFAULT_NARRATOR = "bm_lewis"
+
+# A Gemini voice's stand-in when Gemini can't speak: same sex, similar weight.
+GEMINI_TO_KOKORO = {
+    "Charon": "bm_george", "Enceladus": "am_michael", "Fenrir": "am_fenrir",
+    "Umbriel": "bm_daniel", "Aoede": "af_aoede", "Gacrux": "bf_emma",
+    "Kore": "af_kore", "Vindemiatrix": "bf_isabella", "Zephyr": "af_nova",
+}
+
+ALL_VOICES = frozenset(VALID_VOICES) | frozenset(KOKORO_VOICES)
+
+
+def kokoro_home() -> Path:
+    """Where kokoro_setup.py puts Kokoro's Python environment and model:
+    the D&D data root (DND_CAMPAIGN_ROOT, default ~/.claude/dnd)."""
+    root = os.environ.get("DND_CAMPAIGN_ROOT", "").strip() or "~/.claude/dnd"
+    return Path(root).expanduser()
+
+
+def kokoro_python() -> Path:
+    venv = kokoro_home() / "kokoro-venv"
+    return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def kokoro_models() -> Path:
+    return kokoro_home() / "kokoro-models"
+
+
+def kokoro_installed() -> bool:
+    m = kokoro_models()
+    return (kokoro_python().exists() and (m / "kokoro-v1.0.onnx").exists()
+            and (m / "voices-v1.0.bin").exists())
+
+
+def is_kokoro(voice: str) -> bool:
+    return voice in KOKORO_VOICES
+
+
+def valid_voice(voice: str) -> bool:
+    return voice in ALL_VOICES
+
+
+def kokoro_standin(voice: str) -> str:
+    """The Kokoro voice that reads a line when its own voice can't."""
+    if is_kokoro(voice):
+        return voice
+    return GEMINI_TO_KOKORO.get(voice, DEFAULT_NARRATOR)
+
+
+def kokoro_health(timeout: float = 1.5) -> Optional[dict]:
+    """{"ok": True, "provider": "cuda"|"cpu", ...} from the local Kokoro
+    helper, or None when it isn't running."""
+    try:
+        with urllib.request.urlopen(f"{KOKORO_URL}/health", timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data if data.get("ok") else None
+    except Exception:
+        return None
+
+
+def kokoro_synthesize(text: str, voice: str = DEFAULT_NARRATOR, speed: float = 1.0,
+                      timeout: float = 30.0, use_cache: bool = True) -> bytes:
+    """Read text with a local Kokoro voice; raw L16 PCM (24 kHz mono).
+
+    Raises TtsError when the helper is down or fails."""
+    text = (text or "").strip()
+    if not text:
+        raise TtsError("empty text")
+    text = text[:MAX_TEXT_CHARS]
+    voice = kokoro_standin(voice)
+    key_hash = cache_key(voice, f"{speed:.2f}|{text}", model=KOKORO_MODEL)
+    cached = cache_get(key_hash) if use_cache else None
+    if cached is not None:
+        return cached
+    req = urllib.request.Request(
+        f"{KOKORO_URL}/synth",
+        data=json.dumps({"text": text, "voice": voice, "speed": speed}).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            pcm = resp.read()
+    except urllib.error.HTTPError as e:
+        raise TtsError(f"kokoro http {e.code}", status=e.code) from e
+    except Exception as e:
+        raise TtsError(f"kokoro unavailable: {e}") from e
+    if not pcm:
+        raise TtsError("kokoro returned no audio")
+    cache_put(key_hash, pcm)
+    return pcm
 
 
 # ── CLI for verification ────────────────────────────────────────────────────

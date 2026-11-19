@@ -8,6 +8,7 @@
 <meta name="dnd-token" content="{{ lan_token }}">
 <meta name="narrator-voice" content="{{ narrator_voice }}">
 <meta name="voice-on" content="{{ '1' if voice_on else '0' }}">
+<meta name="voice-local" content="{{ '1' if voice_local else '0' }}">
 <meta name="voice-reason" content="{{ voice_reason }}">
 
 <!-- Theme anti-FOUC. Runs synchronously before the stylesheet parses so the
@@ -2069,8 +2070,24 @@
 
   /* Tab bar — only shown in input-only mode, hidden on the TV view. */
   #dp-tabs { display: none; }
+  /* Rewind: a faint ↶ on the newest player action; one tap arms, the next undoes. */
+  .player-block, .action-block { position: relative; }
+  .rewind-btn {
+    position: absolute; top: 4px; right: 6px; z-index: 2;
+    background: none; border: none; color: inherit; cursor: pointer;
+    font: inherit; font-size: 14px; line-height: 1; padding: 2px 4px;
+    opacity: 0.16; transition: opacity .2s;
+  }
+  .rewind-btn:hover, .rewind-btn:focus-visible { opacity: 0.6; }
+  .rewind-btn.armed {
+    opacity: 1; font-size: 12px; padding: 3px 9px;
+    border: 1px solid currentColor; border-radius: 999px;
+    background: rgba(0,0,0,.35);
+  }
   /* "Waiting on …" banner. TV: a pill at the top centre. Phone: under the tabs. */
   #wait-banner[hidden] { display: none !important; }
+  /* Table request: no "Waiting on" pill on the TV. Phones keep theirs. */
+  body:not(.input-only) #wait-banner { display: none !important; }
   body:not(.input-only) #wait-banner {
     position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 40;
     max-width: min(70vw, 760px); padding: 9px 22px; border-radius: 999px;
@@ -2663,6 +2680,8 @@
     max-width: 80vw;
   }
   #dice-pending-badge.visible { display: block; }
+  /* Table request: the TV never shows the "Waiting on: <roll>" badge; it covered the story. */
+  body:not(.input-only) #dice-pending-badge, body:not(.input-only) #dice-pending-badge.visible { display: none !important; }
   #dice-pending-badge .dpb-label {
     display: block;
     font-weight: 400;
@@ -5177,7 +5196,7 @@ function getOrCreateBlock() {
     textContent.appendChild(currentEl);
     scrollToBottom();
   }
-  return currentEl.querySelector('p:last-child');
+  return currentEl.querySelector('p:last-of-type');
 }
 
 // The typewriter runs once per animation frame and writes every character
@@ -5199,18 +5218,32 @@ function typeNextChar(now) {
   if (charDelay === 0) { isTyping = false; instantFlush(); scrollToBottom(); return; }
 
   now = now || performance.now();
+  // A voice gate: the next sentence waits here until its audio starts, then
+  // types at the speed it is spoken (see "Speech-paced reveal").
+  while (charQueue.length && charQueue[0] && charQueue[0].gate) {
+    if (!_gateOpen(charQueue[0], now)) {
+      _typeLast = now; _typeOwed = 0;
+      _typeRaf = requestAnimationFrame(typeNextChar);
+      return;
+    }
+    charQueue.shift();
+    _typeLast = now; _typeOwed = 0;
+  }
+  const delay = _paceDelay || charDelay;
   // Characters due since the last frame; a hidden tab that wakes up after a
   // long pause catches up in one go rather than typing for minutes.
-  _typeOwed += Math.min(now - (_typeLast || now - charDelay), 2000) / charDelay;
+  _typeOwed += Math.min(now - (_typeLast || now - delay), 2000) / delay;
   _typeLast = now;
   let n = Math.floor(_typeOwed);
   if (n < 1) { _typeRaf = requestAnimationFrame(typeNextChar); return; }
   _typeOwed -= n;
 
   const prevCursor = currentCursor;
-  while (n-- > 0 && charQueue.length) _typeOneItem(charQueue.shift());
+  while (n-- > 0 && charQueue.length && !(charQueue[0] && charQueue[0].gate)) {
+    _typeOneItem(charQueue.shift());
+  }
 
-  const nextCursor = currentEl ? currentEl.querySelector('p:last-child') : null;
+  const nextCursor = currentEl ? currentEl.querySelector('p:last-of-type') : null;
   if (nextCursor !== prevCursor) {
     if (prevCursor) prevCursor.classList.remove('typing-cursor');
     if (nextCursor) nextCursor.classList.add('typing-cursor');
@@ -5219,10 +5252,11 @@ function typeNextChar(now) {
 
   scrollToBottom();
   if (charQueue.length) _typeRaf = requestAnimationFrame(typeNextChar);
-  else isTyping = false;
+  else { isTyping = false; _paceDelay = 0; }
 }
 
 function _typeOneItem(item) {
+  if (item && typeof item === 'object' && item.finish) { item.finish(); return; }
   const p = getOrCreateBlock();
   if (item === '\n') {
     // New paragraph — reset inline state
@@ -5423,6 +5457,8 @@ function instantFlush() {
   const pending = charQueue.splice(0);  // atomically drain
   let flushInline = null;  // local inline tracker for this flush pass
   for (const item of pending) {
+    if (item && typeof item === 'object' && item.gate) continue;   // no voice when skipping ahead
+    if (item && typeof item === 'object' && item.finish) { flushInline = null; item.finish(); continue; }
     if (item === '\n') {
       flushInline = null;
       if (!currentEl) getOrCreateBlock();
@@ -5450,7 +5486,7 @@ function instantFlush() {
   isTyping = false;
   _currentInlineEl = null;
   if (currentCursor) currentCursor.classList.remove('typing-cursor');
-  currentCursor = currentEl ? currentEl.querySelector('p:last-child') : null;
+  currentCursor = currentEl ? currentEl.querySelector('p:last-of-type') : null;
 }
 
 // ── Shared: flush cursor and currentEl before inserting a non-DM block ──
@@ -5485,23 +5521,34 @@ function _flushForBlock() {
 // has to keep asking whether the typewriter is idle and release only when it
 // really is.
 const PENDING_BLOCK_GAP = 320;    // ms of DRAINED typewriter before releasing
-const PENDING_BLOCK_MAX = 8000;   // ms before releasing regardless
+// ms of a reveal making NO progress before releasing regardless. Measured from
+// the last character typed, not from when the block arrived: a long paragraph
+// read aloud takes far longer than any fixed limit, and releasing on a clock
+// dumped the rest of it to the screen (the "types, then jumps down" bug).
+const PENDING_BLOCK_MAX = 15000;
 
 let _pendingBlocks = [];
 let _pendingTimer  = null;
 let _pendingSince  = 0;
+let _pendingMark   = -1;          // charQueue length at the last progress check
 
 function _typewriterActive() {
   return isTyping || charQueue.length > 0;
 }
 
 function _releasePending() {
-  const items = _pendingBlocks;
-  _pendingBlocks = [];
-  _pendingSince = 0;
-  for (const fn of items) {
+  // One at a time: a released block that types (an NPC line, more narration)
+  // must finish before the next one lands, or it would be dumped by it.
+  while (_pendingBlocks.length) {
+    const fn = _pendingBlocks.shift();
     try { fn(); } catch (e) { console.error('deferred block failed', e); }
+    if (_typewriterActive() && _pendingBlocks.length) {
+      _pendingSince = Date.now(); _pendingMark = charQueue.length;
+      _schedulePendingFlush();
+      return;
+    }
   }
+  _pendingSince = 0;
 }
 
 function _schedulePendingFlush() {
@@ -5511,6 +5558,7 @@ function _schedulePendingFlush() {
     // A stalled reveal must not swallow the queue. Without this valve a
     // typewriter that never drains means a dice result the table is waiting
     // on never appears at all, which is worse than the snap it replaced.
+    if (charQueue.length !== _pendingMark) { _pendingMark = charQueue.length; _pendingSince = Date.now(); }
     const waited = _pendingSince ? (Date.now() - _pendingSince) : 0;
     if (_typewriterActive() && waited < PENDING_BLOCK_MAX) {
       _pendingTimer = setTimeout(tick, PENDING_BLOCK_GAP);   // re-arm
@@ -5529,7 +5577,7 @@ function _deferBlock(fn, isReplay) {
     fn();
     return;
   }
-  if (!_pendingSince) _pendingSince = Date.now();
+  if (!_pendingSince) { _pendingSince = Date.now(); _pendingMark = charQueue.length; }
   _pendingBlocks.push(fn);
   _schedulePendingFlush();
 }
@@ -5549,6 +5597,58 @@ function _reanchorCursor() {
 // ── Player action block ──────────────────────────────────────────────
 function renderPlayerBlock(name, text, isReplay) {
   _deferBlock(() => _renderPlayerBlockNow(name, text, isReplay), isReplay);
+}
+
+// ── Rewind: a faint ↶ on the newest player action (TV only) ──────────
+// One tap arms it ("Rewind?"), a second tap within 4 s undoes the turn.
+function _rewindRefresh() {
+  document.querySelectorAll('.rewind-btn').forEach(b => b.remove());
+  if (document.body.classList.contains('input-only')) return;
+  const blocks = textContent.querySelectorAll('.player-block, .action-block');
+  const last = blocks[blocks.length - 1];
+  if (!last) return;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rewind-btn';
+  b.textContent = '↶';
+  b.title = 'Rewind this turn';
+  b.setAttribute('aria-label', 'Rewind this turn');
+  let armTimer = null;
+  b.addEventListener('click', ev => {
+    ev.stopPropagation();
+    if (!b.classList.contains('armed')) {
+      b.classList.add('armed');
+      b.textContent = '↶ Rewind?';
+      armTimer = setTimeout(() => { b.classList.remove('armed'); b.textContent = '↶'; }, 4000);
+      return;
+    }
+    clearTimeout(armTimer);
+    b.disabled = true;
+    fetch('/rewind', { method: 'POST', headers: _authHeaders() })
+      .then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => { if (!ok) { _showToast(j.error || 'Rewind failed', 5000); b.disabled = false; } })
+      .catch(() => { _showToast('Rewind failed', 5000); b.disabled = false; });
+  });
+  last.appendChild(b);
+}
+
+function _applyRewind(r) {
+  clearDisplay(() => {
+    renderReplayBatch(r.log || []);
+    if (r.stats) {
+      try { updateStats(r.stats); } catch (_) {}
+      try { _bmUpdate(r.stats); } catch (_) {}
+    }
+    _rewindRefresh();
+  });
+  const inputs = r.inputs || [];
+  const mine = (new URLSearchParams(location.search).get('char') || '').trim().toLowerCase();
+  const back = inputs.find(i => mine && String(i.character).toLowerCase() === mine);
+  const box = document.getElementById('player-input-text');
+  if (back && box) { box.value = back.text; try { box.focus(); } catch (_) {} }
+  const who = inputs.map(i => i.character).join(', ');
+  _showToast(back ? 'Turn rewound. Your last action is back in the box: fix it and send again.'
+                  : `Turn rewound${who ? ` (${who})` : ''}. Waiting for the corrected action.`, 7000);
 }
 
 function _renderPlayerBlockNow(name, text, isReplay) {
@@ -5578,6 +5678,7 @@ function _renderPlayerBlockNow(name, text, isReplay) {
   });
 
   textContent.appendChild(block);
+  if (!isReplay) _rewindRefresh();
   _reanchorCursor();
 }
 
@@ -5608,6 +5709,7 @@ function _renderActionBlockNow(name, text, isReplay) {
   block.appendChild(p);
 
   textContent.appendChild(block);
+  if (!isReplay) _rewindRefresh();
   _reanchorCursor();
 }
 
@@ -5633,6 +5735,30 @@ function _renderNPCBlockNow(name, text, isReplay, voice) {
     .replace(/\r/g, '')
     .replace(/\t/g, '  ')
     .trim();
+
+  // Live: the line types out in its place in the turn, spoken as it types.
+  if (!isReplay && charDelay > 0) {
+    if (voice) block.dataset.voice = voice;
+    block.appendChild(document.createElement('p'));
+    textContent.appendChild(block);
+    currentEl = block;
+    const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+    const items = [];
+    lines.forEach((l, i) => { for (const c of l) items.push(c); if (i < lines.length - 1) items.push('\n'); });
+    if (_voiceOn && _ttsAutoNarrate) {
+      const spoken = _ttsStripRolls(lines.join(' ')).replace(/\s+/g, ' ').trim();
+      if (spoken) {
+        charQueue.push(_makeGate(spoken, _ttsBlockVoice(block), items.length, GATE_WAIT_NPC));
+        _ttsShowAudioGate();
+      }
+    }
+    for (const it of items) charQueue.push(it);
+    charQueue.push({ finish: () => _finishTypedBlock(block) });
+    _gatePrefetchAhead(1);
+    scrollToBottom();
+    startTyping();
+    return;
+  }
 
   cleaned.split('\n').forEach(line => {
     const trimmed = line.trim();
@@ -5918,7 +6044,10 @@ function clearDisplay(then) {
   // Fade out, wipe, fade back in, then call the callback.
   textContent.style.opacity = '0';
   setTimeout(() => {
-    // Abort any in-progress typewriter
+    // Abort any in-progress typewriter, held blocks and voice
+    if (typeof _revealStop === 'function') _revealStop();
+    _pendingBlocks = []; clearTimeout(_pendingTimer); _pendingTimer = null; _pendingSince = 0;
+    if (typeof _ttsAutoQueue !== 'undefined') { _ttsAutoQueue.length = 0; _ttsStopActive(); }
     charQueue        = [];
     isTyping         = false;
     if (_typeRaf) { cancelAnimationFrame(_typeRaf); _typeRaf = 0; }
@@ -5960,6 +6089,13 @@ function _hideProcessingIndicator() {
 
 function handleIncomingText(text) {
   _hideProcessingIndicator();
+  // Narration that arrives behind a held block (an NPC line still typing, a
+  // dice result waiting its turn) waits behind it, so a turn reads in order.
+  if (_pendingBlocks.length) { _deferBlock(() => _handleIncomingTextNow(text), false); return; }
+  _handleIncomingTextNow(text);
+}
+
+function _handleIncomingTextNow(text) {
   // Debounce block separation: if there was a gap > IDLE_GAP, new block
   const now = Date.now();
   if (now - lastChunkTime > IDLE_GAP && charQueue.length === 0 && !isTyping) {
@@ -5979,9 +6115,11 @@ function handleIncomingText(text) {
     .replace(/\[[\d;?]*[a-zA-Z]/g, '')           // strip leftover CSI remnants
     .replace(/\r/g, '')
     .replace(/\t/g, '  ');
-  for (const item of _mdParse(cleaned)) {
+  const paced = _narrationPaced() && !/^\s*\|.*\|\s*$/m.test(cleaned);
+  for (const item of (paced ? _pacedItems(cleaned) : _mdParse(cleaned))) {
     charQueue.push(item);
   }
+  if (paced) { _gatePrefetchAhead(2); _ttsShowAudioGate(); }
 
   startTyping();
 }
@@ -7247,6 +7385,136 @@ document.getElementById('speed-row').addEventListener('click', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// SPEECH-PACED REVEAL
+// Narration is cut into sentences. Each sentence is preceded in the
+// typewriter queue by a voice gate: the typewriter stops at the gate until
+// that sentence's audio starts, then types it at the speed it is spoken, so
+// the words on screen keep pace with the voice. Sentences are fetched a
+// couple ahead, so after the first one (~0.3 s on the GPU) there is no wait.
+//
+// A gate never holds the table up: if the audio fails, the voice is off, the
+// browser hasn't been tapped for audio yet, or the clip is slow (GATE_WAIT_*),
+// the sentence types at normal speed with no voice.
+//
+// NPC lines get one gate for the whole line (one Gemini request, which falls
+// back to a local voice on the server when Gemini can't speak).
+// ═══════════════════════════════════════════════════════════════════
+
+const GATE_WAIT_LOCAL = 4000;    // ms to wait for a local (Kokoro) sentence
+const GATE_WAIT_NPC   = 14000;   // ms to wait for an NPC line (Gemini, then Kokoro)
+let _revealSources  = [];        // AudioBufferSourceNodes playing or scheduled
+let _revealAudioEnd = 0;         // AudioContext time the last voiced sentence ends
+let _paceDelay      = 0;         // ms per character while a voiced sentence types; 0 = normal
+
+// Narration is paced only with the local narrator: one request per sentence
+// would use up Gemini's 10-a-day quota within a single turn.
+function _narrationPaced() {
+  return _voiceOn && _ttsAutoNarrate && charDelay > 0 && _voiceLocal && _isLocalVoice(_ttsVoice);
+}
+
+function _makeGate(text, voice, chars, maxWait) {
+  return { gate: true, text, voice, chars, maxWait, p: null, pcm: null, failed: false, since: 0 };
+}
+
+function _gateFetch(g) {
+  if (g.p) return;
+  g.p = _ttsFetchPcm(g.text, g.voice)
+    .then(buf => { if (!buf.byteLength) throw new Error('empty'); g.pcm = buf; })
+    .catch(() => { g.failed = true; });
+}
+
+// Start fetching the next n gates waiting in the queue.
+function _gatePrefetchAhead(n) {
+  let k = 0;
+  for (const it of charQueue) {
+    if (it && it.gate) { _gateFetch(it); if (++k >= n) break; }
+  }
+}
+
+// May the typewriter pass this gate now? Starts the sentence's audio when it can.
+function _gateOpen(g, now) {
+  if (!g.since) { g.since = now; _gateFetch(g); }
+  if (!_voiceOn) { _paceDelay = 0; return true; }
+  const ctx = _getTtsCtx();
+  if (g.pcm) {
+    if (ctx.state !== 'running') { _paceDelay = 0; return true; }   // audio still locked: text only
+    // The sentence before it is still being spoken: wait for it to finish.
+    if (ctx.currentTime < _revealAudioEnd - 0.05) return false;
+    const int16 = new Int16Array(g.pcm);
+    const buf = ctx.createBuffer(1, int16.length, 24000);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < int16.length; i++) ch[i] = int16[i] / 32768.0;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const at = Math.max(ctx.currentTime, _revealAudioEnd);
+    src.start(at);
+    _revealAudioEnd = at + buf.duration;
+    _revealSources.push(src);
+    src.onended = () => { _revealSources = _revealSources.filter(x => x !== src); };
+    // Type the sentence over the time it takes to say it.
+    _paceDelay = Math.max(8, (buf.duration * 1000) / Math.max(1, g.chars));
+    if (currentEl) currentEl.dataset.spoken = '1';
+    _gatePrefetchAhead(2);
+    return true;
+  }
+  if (g.failed || now - g.since > g.maxWait) {
+    _paceDelay = 0;
+    _gatePrefetchAhead(2);
+    return true;
+  }
+  return false;
+}
+
+function _revealStop() {
+  _revealSources.forEach(x => { try { x.stop(); } catch (_) {} });
+  _revealSources = [];
+  _revealAudioEnd = 0;
+  _paceDelay = 0;
+}
+
+// Narration text -> typewriter items with a voice gate before each sentence.
+function _pacedItems(cleaned) {
+  const out = [];
+  const voice = _ttsVoice;
+  const lines = cleaned.split('\n');
+  lines.forEach((line, li) => {
+    const items = [];
+    _mdParseInline(line, items);
+    let seg = [];
+    const said = () => seg.filter(x => typeof x === 'string').join('');
+    const flush = () => {
+      if (!seg.length) return;
+      const spoken = _ttsStripRolls(said()).replace(/\s+/g, ' ').trim();
+      if (/[A-Za-z0-9]/.test(spoken)) {
+        out.push(_makeGate(spoken, voice, seg.filter(x => typeof x === 'string').length, GATE_WAIT_LOCAL));
+      }
+      for (const x of seg) out.push(x);
+      seg = [];
+    };
+    for (const it of items) {
+      seg.push(it);
+      // A sentence ends at . ! ? or … (and any closing quote or bracket) before a space.
+      if (it === ' ') {
+        const t = said();
+        if (t.length >= 12 && /[.!?…]["”’'\)\]]*\s$/.test(t)) flush();
+      }
+    }
+    flush();
+    if (li < lines.length - 1) out.push('\n');
+  });
+  return out;
+}
+
+// An NPC line typed through the typewriter is closed off like a narration block.
+function _finishTypedBlock(block) {
+  if (currentCursor) { currentCursor.classList.remove('typing-cursor'); currentCursor = null; }
+  _addTtsBar(block, { replay: false });
+  if (currentEl === block) currentEl = null;
+  scrollToBottom();
+}
+
 // TTS — per-block narrator audio playback (Gemini Flash TTS)
 // Only .dm-block and .npc-block get a TTS bar. Player/dice/tutor blocks
 // are excluded by omission in their renderers.
@@ -7261,6 +7529,17 @@ document.getElementById('speed-row').addEventListener('click', () => {
 
 const _TTS_VOICES_MALE   = ['Charon', 'Enceladus', 'Fenrir', 'Umbriel'];
 const _TTS_VOICES_FEMALE = ['Aoede', 'Gacrux', 'Kore', 'Vindemiatrix', 'Zephyr'];
+// Local Kokoro narrator voices (kokoro_server.py). When Kokoro is installed it
+// reads the narration and Gemini keeps the NPC lines.
+const _KOKORO_GROUPS = [
+  ['British men',    ['bm_lewis', 'bm_george', 'bm_fable', 'bm_daniel']],
+  ['British women',  ['bf_emma', 'bf_isabella', 'bf_alice', 'bf_lily']],
+  ['American men',   ['am_michael', 'am_fenrir', 'am_adam', 'am_echo', 'am_eric', 'am_liam', 'am_onyx', 'am_puck', 'am_santa']],
+  ['American women', ['af_heart', 'af_bella', 'af_nicole', 'af_aoede', 'af_kore', 'af_sarah', 'af_nova', 'af_sky', 'af_alloy', 'af_jessica', 'af_river']],
+];
+const _voiceLocal = (document.querySelector('meta[name="voice-local"]') || {}).content === '1';
+function _isLocalVoice(v) { return /^[ab][fm]_[a-z]+$/.test(v || ''); }
+function _voiceLabel(v) { return _isLocalVoice(v) ? v.split('_')[1].replace(/^./, c => c.toUpperCase()) : v; }
 
 // The voice works fully or stays off. The server checks it at start (and
 // again when the key changes or the quota resets) and tells every screen;
@@ -7332,6 +7611,13 @@ function _ttsAutoEnqueue(btn, blockEl) {
 }
 
 async function _ttsAutoNext() {
+  // Don't talk over the narration still being read as it types.
+  if (_ttsAutoQueue.length && typeof _ttsCtx !== 'undefined' && _ttsCtx
+      && _ttsCtx.currentTime < _revealAudioEnd - 0.05) {
+    _ttsAutoBusy = true;
+    setTimeout(_ttsAutoNext, 200);
+    return;
+  }
   const next = _ttsAutoQueue.shift();
   if (!next) { _ttsAutoBusy = false; return; }
   _ttsAutoBusy = true;
@@ -7369,7 +7655,7 @@ function _voiceSet(on, reason) {
   const changed = on !== _voiceOn || reason !== _voiceReason;
   _voiceOn = on; _voiceReason = reason;
   document.body.classList.toggle('voice-off', !on);
-  if (!on) { _ttsAutoQueue.length = 0; _ttsStopActive(); }
+  if (!on) { _ttsAutoQueue.length = 0; _ttsStopActive(); _revealStop(); }
   _voiceRefreshRows();
   if (changed && typeof _showToast === 'function') {
     _showToast(on ? 'Narration voice is on' : `Narration voice is off: ${reason}. Text only.`, 7000);
@@ -7520,7 +7806,7 @@ function _ttsBuildVoiceMenu() {
       const opt = document.createElement('button');
       opt.className = 'tts-voice-opt';
       opt.dataset.voice = v;
-      opt.textContent = v;
+      opt.textContent = _voiceLabel(v);
       if (v === _ttsVoice) opt.classList.add('tts-voice-active');
       opt.addEventListener('click', e => {
         e.stopPropagation();
@@ -7530,8 +7816,12 @@ function _ttsBuildVoiceMenu() {
       menu.appendChild(opt);
     });
   }
-  _addGroup('Male',   _TTS_VOICES_MALE);
-  _addGroup('Female', _TTS_VOICES_FEMALE);
+  if (_voiceLocal) {
+    _KOKORO_GROUPS.forEach(([label, voices]) => _addGroup(label, voices));
+  } else {
+    _addGroup('Male',   _TTS_VOICES_MALE);
+    _addGroup('Female', _TTS_VOICES_FEMALE);
+  }
   return menu;
 }
 
@@ -7572,9 +7862,12 @@ function _addTtsBar(blockEl, opts) {
 
   // History replayed on page load or reconnect is never read aloud by itself.
   if (_ttsAutoNarrate && !isReplay && _voiceOn) {
-    // Defer one tick so the bar is in the DOM before triggering the click path
-    setTimeout(() => _ttsAutoEnqueue(playBtn, blockEl), 0);
-    _ttsShowAudioGate();
+    // A block read aloud while it typed (speech-paced reveal) is not read again.
+    if (!blockEl.dataset.spoken) {
+      // Defer one tick so the bar is in the DOM before triggering the click path
+      setTimeout(() => _ttsAutoEnqueue(playBtn, blockEl), 0);
+      _ttsShowAudioGate();
+    }
   }
 }
 
@@ -8966,6 +9259,10 @@ function connect() {
     }
     if (payload.replay_batch) {
       renderReplayBatch(payload.replay_batch);
+      _rewindRefresh();
+    }
+    if (payload.rewind) {
+      _applyRewind(payload.rewind);
     }
     if (payload.replay) {
       renderReplay(payload.replay);  // legacy fallback

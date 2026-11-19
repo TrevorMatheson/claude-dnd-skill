@@ -95,4 +95,14 @@ if content:
     except Exception:
         pass
 
+if content:
+    try:
+        sys.path.insert(0, DISPLAY_DIR)
+        import rewind
+        note = rewind.take_note(RT)
+        if note:
+            content = note + "\n" + content
+    except Exception:
+        pass
+
 sys.stdout.write(content)
