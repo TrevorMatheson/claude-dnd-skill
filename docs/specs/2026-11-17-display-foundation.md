@@ -78,7 +78,13 @@ theme, and a cast where every character keeps their own voice.
   Kokoro narration with typing in step with the voice; blocks in order with
   roll requests pinned to the bottom; the ↶ rewind; NPC voice blocks; the
   "Tap for audio" prompt; a "reconnecting" badge when the connection drops,
-  catching up when it returns.
+  catching up when it returns; the phone-approval cards (a new phone asking
+  to join shows a card with Approve and Deny — added 2026-11-18, D24).
+- **D24 — New phones can be approved from `/tv`.** The old TV's
+  phone-approval cards are part of the parity list. The old TV's on-screen
+  dice roller, DM Help button and sound-effects toggle are not: players roll
+  and ask from their phones. *Why:* without the cards, a new phone can't join
+  while the TV runs `/tv`.
 - **D14 — The background is its own layer.** It shows the current scene
   background unchanged, as a placeholder. The Scene backgrounds spec
   (animations, generated images) replaces that layer later without touching

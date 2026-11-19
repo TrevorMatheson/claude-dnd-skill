@@ -231,12 +231,14 @@ status: approved      # proposed → approved
     - `rewind` and `clear` events re-render the feed.
     - Earlier blocks are dimmed. The DOM is pruned to about the last 80 blocks.
   - `bg.js` copies the scene, particle and sky code unchanged, driven by the `scene` event and `stats.world_time`.
+  - `devices.js` (D24) ports the phone-approval cards (`index.html:8937-9015`): a `device_request` event (live, or replayed on connect, `dnd-display-app.py:3659`) shows a card with the phone's IP, Approve and Deny; the buttons POST `/device/approve` or `/device/deny` with the page token; `device_approved` / `device_denied` remove the card. A request already on screen is not shown twice. The old page's own-phone "Awaiting approval…" logic stays on the phone page and is not ported.
   - Each event handler runs inside try/catch, so one bad payload cannot stop the feed.
 - **Done when:**
   - Node tests (skipped without node) pass:
     - Feeding `hello(E1)` plus a replay, then a reconnect with `hello(E1)` and an overlapping replay, renders each `seq` once.
     - `hello(E2)` re-renders from the replay with no duplicates.
     - A roll card stays last after later blocks and goes away on `dice_pending: []`.
+    - A `device_request` shows one card per device id (a replayed request doesn't duplicate it); Approve posts `/device/approve` with `{id}`; `device_approved` and `device_denied` remove the card.
   - Browser checks:
     - Stopping the server shows the badge within 3 s.
     - Restarting it hides the badge with no duplicated blocks.
