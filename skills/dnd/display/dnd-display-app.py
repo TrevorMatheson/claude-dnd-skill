@@ -1049,6 +1049,28 @@ def _phone_present(char: str) -> bool:
 _text_log: deque = deque(maxlen=2000)
 _text_log_lock = threading.Lock()
 
+# Every log entry and its live broadcast carry `seq`, a counter that only goes
+# up (a rewind or reload never lowers it). `_epoch` is new on every server
+# start and is sent first on /stream as {"hello": {"epoch": ...}}. A screen
+# that reconnects to the same epoch skips replayed entries it already has; a
+# new epoch means the server restarted and the screen rebuilds from the replay.
+_seq = 0
+_epoch = secrets.token_hex(8)
+
+
+def _log_append(log_entry: dict, payload: Optional[dict] = None) -> None:
+    """Append one entry to the text log and the session tail, stamping the
+    next `seq` on the entry and on its broadcast payload."""
+    global _seq
+    with _text_log_lock:
+        _seq += 1
+        log_entry["seq"] = _seq
+        if payload is not None:
+            payload["seq"] = _seq
+        _text_log.append(log_entry)
+    with _tail_lock:
+        _tail_buffer.append(log_entry)
+
 # ─── Session tail buffer ──────────────────────────────────────────────────────
 # Rolling buffer of the last 30 text events — written to session_tail.json after
 # every /chunk POST so it survives crashes. Read at /dnd load for display replay.
@@ -1194,17 +1216,27 @@ def _persist_log() -> None:
 
 def _load_log() -> None:
     """Load a previously persisted text log on startup.
-    Handles both old string format and new dict format."""
+    Handles both old string format and new dict format. Entries saved before
+    `seq` existed are numbered above the highest one already present."""
+    global _seq
     try:
         with open(LOG_FILE, encoding="utf-8") as f:
             data = json.load(f)
+        items = [{"text": i} if isinstance(i, str) else i for i in data]  # old plain strings
+        items = [i for i in items if isinstance(i, dict)]
+        seen = [i["seq"] for i in items if isinstance(i.get("seq"), int)]
+        top = max([_seq] + seen)
+        used: set = set()
+        for item in items:
+            s = item.get("seq")
+            if not isinstance(s, int) or s in used:
+                top += 1
+                item["seq"] = top
+            used.add(item["seq"])
         with _text_log_lock:
             _text_log.clear()
-            for item in data[:]:
-                # Migrate old plain-string entries to dict format
-                if isinstance(item, str):
-                    item = {"text": item}
-                _text_log.append(item)
+            _text_log.extend(items)
+            _seq = max(_seq, top)
     except Exception:
         pass
 
@@ -1490,10 +1522,7 @@ def chunk():
         if is_milestone_award and data.get("reason"):
             payload["reason"] = str(data["reason"]).strip()[:240]
             log_entry["reason"] = payload["reason"]
-        with _text_log_lock:
-            _text_log.append(log_entry)
-        with _tail_lock:
-            _tail_buffer.append(log_entry)
+        _log_append(log_entry, payload)
         _persist_log()
         _persist_tail()
         _broadcast(payload)
@@ -1510,10 +1539,7 @@ def chunk():
         if reason:
             payload["reason"] = reason
             log_entry["reason"] = reason
-        with _text_log_lock:
-            _text_log.append(log_entry)
-        with _tail_lock:
-            _tail_buffer.append(log_entry)
+        _log_append(log_entry, payload)
         _persist_log()
         _persist_tail()
         _broadcast(payload)
@@ -1538,10 +1564,7 @@ def chunk():
             return "", 204
         payload = {"xp_award": xp_data, "text": xp_data.get("summary", "")}
         log_entry = {"xp_award": xp_data, "text": xp_data.get("summary", "")}
-        with _text_log_lock:
-            _text_log.append(log_entry)
-        with _tail_lock:
-            _tail_buffer.append(log_entry)
+        _log_append(log_entry, payload)
         _persist_log()
         _persist_tail()
         _broadcast(payload)
@@ -1606,10 +1629,7 @@ def chunk():
     except Exception:
         pass
 
-    with _text_log_lock:
-        _text_log.append(log_entry)
-    with _tail_lock:
-        _tail_buffer.append(log_entry)
+    _log_append(log_entry, payload)
 
     _persist_log()
     _persist_tail()
@@ -2724,10 +2744,7 @@ def player_dice():
     except Exception:
         pass
 
-    with _text_log_lock:
-        _text_log.append(log_entry)
-    with _tail_lock:
-        _tail_buffer.append(log_entry)
+    _log_append(log_entry, payload)
     _persist_log()
     _persist_tail()
     _broadcast(payload)
@@ -3433,6 +3450,10 @@ def stream():
         _ch = (request.args.get("character") or request.args.get("char") or "").strip().lower()[:48]
         if _ch:
             _client_chars[q] = _ch
+
+    # First: which server boot this is, so a reconnecting screen knows whether
+    # the replay below continues what it has (same epoch) or starts over.
+    q.put_nowait({"hello": {"epoch": _epoch}})
 
     # Send the current scene immediately on connect so the browser
     # starts with the right background even mid-session.
