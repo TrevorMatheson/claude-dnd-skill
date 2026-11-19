@@ -1,0 +1,44 @@
+/* Theme tokens for the TV page — spec D23: Ink & Margin's look with
+   Hearthlight's type. Taken from docs/specs/mockups/display-themes.html
+   ("ink" look + data-type="hearth"), px converted to rem at 16px = 1rem.
+   Fonts are bundled (OFL, see fonts/OFL.txt) so the table needs no network. */
+
+@font-face { font-family: "Fraunces"; src: url("fonts/Fraunces.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("fonts/Fraunces-Italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("fonts/Literata.woff2") format("woff2"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("fonts/Literata-Italic.woff2") format("woff2"); font-weight: 200 900; font-style: italic; font-display: swap; }
+
+:root {
+  /* Color */
+  --ink: #f1ebe1;
+  --ink-dim: #b6aa98;
+  --accent: #e06a55;
+  --accent-soft: rgba(224, 106, 85, .16);
+  --npc: #f0c89b;
+  --you: #a9cfe0;
+  --hp: #c8d79a;
+  --hp-low: #e06a55;
+  --cond: #d7a9df;
+  --panel: transparent;
+  --panel-line: rgba(241, 235, 225, .22);
+  --radius: 0;
+  --text-shadow: 0 2px 12px rgba(0, 0, 0, .9);
+
+  /* Battle map */
+  --map-floor: #201914;
+  --map-line: rgba(241, 235, 225, .08);
+  --map-wall: #0a0705;
+
+  /* Type */
+  --f-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --f-body: "Literata", Georgia, "Times New Roman", serif;
+  --f-label: "Fraunces", Georgia, "Times New Roman", serif;
+  --label-case: none;
+  --label-track: .01em;
+  --label-style: italic;
+  --label-size: 1.3125rem;      /* 21px at 1080p */
+  --narr-size: 1.9375rem;       /* 31px — story */
+  --narr-size-combat: 1.875rem; /* 30px — combat */
+
+  color-scheme: dark;
+}

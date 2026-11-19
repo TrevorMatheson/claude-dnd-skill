@@ -520,7 +520,13 @@ def _token_ok() -> bool:
     return hmac.compare_digest(provided, _lan_token)
 
 
-app = Flask(__name__)
+# Absolute folders: tests load this file by path, so a relative folder would
+# resolve against whatever directory the test runner started in.
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_HERE, "templates"),
+    static_folder=os.path.join(_HERE, "static"),
+)
 
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 CORS(app)
@@ -1313,16 +1319,28 @@ def _broadcast(payload: dict) -> None:
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
-@app.route("/")
-def index():
-    # Pass LAN token to template so the browser can authenticate /help-request
-    return render_template(
-        "index.html",
+def _page_vars() -> dict:
+    """Template variables every display page carries (token, voice state)."""
+    return dict(
+        # The LAN token lets the browser authenticate its POSTs
         lan_token=_lan_token or "",
         narrator_voice=_read_narrator_voice(),
         voice_on=_voice_payload()["on"],
         voice_reason=_voice_payload()["reason"],
+        voice_local=bool(_tts is not None and getattr(_tts, "kokoro_installed", lambda: False)()),
     )
+
+
+@app.route("/")
+def index():
+    return render_template("index.html", **_page_vars())
+
+
+@app.route("/tv")
+def tv():
+    """The new TV page (display foundation spec). Runs beside the old page
+    at / until a real game night has been played on it."""
+    return render_template("tv.html", **_page_vars())
 
 
 @app.route("/icons/<path:filename>")
