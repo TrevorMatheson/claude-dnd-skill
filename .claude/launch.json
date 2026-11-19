@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "display",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["skills/dnd/display/dnd-display-app.py"],
+      "port": 5001
+    },
+    {
+      "name": "display-lan",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["skills/dnd/display/dnd-display-app.py", "--lan", "--tls"],
+      "port": 5001,
+      "url": "https://localhost:5001"
+    }
+  ]
+}
