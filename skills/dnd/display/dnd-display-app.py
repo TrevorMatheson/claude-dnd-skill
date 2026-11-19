@@ -20,6 +20,7 @@ Endpoints:
     GET  /srd-lookup           → look up a spell/item/feature/condition by name
 """
 
+import copy
 import hmac
 import json
 import os
@@ -49,6 +50,7 @@ import calendar as _stdlib_calendar  # noqa: F401
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from runtime_paths import rt          # resolves <data-root>/.runtime
+import display_config                 # per-campaign display.json (layout, voice)
 LOG_FILE      = rt("text_log.json")
 
 # SRD lookup module — degrades silently if dataset not built
@@ -1375,6 +1377,77 @@ def tv():
     return render_template("tv.html", **_page_vars())
 
 
+# ─── Display settings (layout and voice, per campaign) ───────────────────────
+# Read from <campaign>/display.json on first use and again whenever the active
+# campaign changes. Written only when the host changes something.
+_display_lock = threading.Lock()
+_display_cache: dict = {"campaign": None, "config": None}
+_mode_override = None   # True/False forces combat/story on the TV; None = automatic
+
+
+def _campaign_dir():
+    """The active campaign's folder, or None when no campaign is loaded."""
+    name = _active_campaign_name()
+    if not name:
+        return None
+    try:
+        path = _find_campaign(name)
+    except (OSError, ValueError, TypeError):
+        return None
+    return path if path and os.path.isdir(str(path)) else None
+
+
+def _display_config() -> dict:
+    """The active campaign's display settings (defaults when none are saved)."""
+    name = _active_campaign_name()
+    with _display_lock:
+        if _display_cache["config"] is None or _display_cache["campaign"] != name:
+            folder = _campaign_dir()
+            _display_cache["config"] = (display_config.load(folder) if folder
+                                        else display_config.default())
+            _display_cache["campaign"] = name
+        return copy.deepcopy(_display_cache["config"])
+
+
+def _display_payload() -> dict:
+    return {"display": {"config": _display_config(), "mode_override": _mode_override}}
+
+
+def _host_only() -> bool:
+    """Settings change only from the computer running the game: the LAN token
+    is in every page served, phones included, so the token alone is not enough."""
+    return _token_ok() and request.remote_addr in ("127.0.0.1", "::1")
+
+
+@app.route("/display-config", methods=["GET"])
+def display_config_get():
+    return jsonify(
+        config=_display_config(),
+        presets=display_config.PRESETS,
+        modules=list(display_config.MODULES),
+        mode_override=_mode_override,
+        status={},
+    )
+
+
+@app.route("/display-config", methods=["POST"])
+def display_config_post():
+    if not _host_only():
+        return jsonify(error="Open this on the computer running the game."), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Send the settings as a JSON object."), 400
+    clean = display_config.validate(data)
+    folder = _campaign_dir()
+    if folder:
+        clean = display_config.save(folder, clean)
+    with _display_lock:
+        _display_cache["config"] = clean
+        _display_cache["campaign"] = _active_campaign_name()
+    _broadcast(_display_payload())
+    return jsonify(config=clean, saved=bool(folder))
+
+
 @app.route("/icons/<path:filename>")
 def serve_icon(filename):
     """Serve icons, favicon, and brand assets from display/icons/."""
@@ -1899,6 +1972,12 @@ def stats():
             with open(CAMP_FILE, "w", encoding="utf-8") as f:
                 f.write(str(data["campaign"]).strip())
             _load_tail()
+        except Exception:
+            pass
+        # Open screens switch to the new campaign's layout and voice settings
+        # (the cache reloads because the active campaign name changed).
+        try:
+            _broadcast(_display_payload())
         except Exception:
             pass
         # Resolve and stash the ruleset for this campaign so the sidebar badge
@@ -3468,6 +3547,9 @@ def stream():
         recent = list(_text_log)[-200:]
     if recent:
         q.put_nowait({"replay_batch": recent})
+
+    # The TV's layout and voice settings for the active campaign.
+    q.put_nowait(_display_payload())
 
     # Send current stats so the sidebar is populated immediately on (re)connect.
     with _stats_lock:
