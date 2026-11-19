@@ -186,7 +186,7 @@ $C move Havoc 7 4 -c $CAMP                 # checks walls, obstacles, difficult 
 $C hp "Giant Rat" 3/7 -c $CAMP             # monster HP ring (PCs use the party sidebar's HP)
 $C attack --atk 5 --ac 12 --dmg 1d6+3 --from Anony --target "Giant Rat" --range 80/320 -c $CAMP
 $C map show -c $CAMP                       # text view of the map and everyone's movement used
-$C map clear -c $CAMP                      # fight over: take the map off the TV
+$C end --clear-map -c $CAMP                # fight over: end combat and take the map off the TV
 ```
 
 A layout is a text drawing, one character per 5-ft square: `#` wall, `.` floor, `~` difficult terrain, `T` obstacle, `D` door, space = outside. Letters mark starting squares, bound by legend lines — **UPPERCASE = PC**, lowercase = monster: `H = Havoc`, `r = Giant Rat`. A background image goes in `<campaign-dir>/maps/`; draw the layout to match its grid.

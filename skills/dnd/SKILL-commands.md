@@ -512,7 +512,7 @@ Run `scripts/dice.py <notation>`. Display output verbatim. Examples: `d20`, `2d6
 
 ## `/dm:dnd combat start`
 1. Identify combatants; collect name, DEX mod, HP, AC, type (pc/npc) for each.
-2. Run `combat.py init '<JSON>'` — auto-roll initiative for every combatant including PCs. Display tracker and per-combatant roll breakdown.
+2. Run `combat.py init '<JSON>'` — auto-roll initiative for every combatant including PCs. Display tracker and per-combatant roll breakdown. It also sends the turn order to the display, which switches the TV to combat mode — no separate push.
 3. Send initiative to display:
    ```bash
    python3 ${CLAUDE_SKILL_DIR}/display/send.py << 'DNDEND'
@@ -521,13 +521,9 @@ Run `scripts/dice.py <notation>`. Display output verbatim. Examples: `d20`, `2d6
    Turn order: [Name] → [Name] → ...
    DNDEND
    ```
-4. Push turn order to stats sidebar:
-   ```bash
-   python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-order '{"order":[...],"current":"FirstName","round":1}'
-   ```
-5. Save STATE_JSON to `state.md` under `## Active Combat`.
-6. Step through turns using the per-turn sequence (in SKILL.md Active DM Mode).
-7. On combat end: update HP in character sheets, clear `## Active Combat`, `push_stats.py --turn-clear`, narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear` (ends encounter conditions and round-long effects; minute/hour effects, exhaustion and petrification stay).
+4. Save STATE_JSON to `state.md` under `## Active Combat`.
+5. Step through turns using the per-turn sequence (in SKILL.md Active DM Mode).
+6. On combat end: update HP in character sheets, clear `## Active Combat`, run `combat.py end` (with a battle map up: `combat.py end --clear-map -c <campaign>`, which also deletes the map; the turn order clears and the TV leaves combat mode), narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear` (ends encounter conditions and round-long effects; minute/hour effects, exhaustion and petrification stay).
 
 **XP awards** go in the final display send:
 ```bash

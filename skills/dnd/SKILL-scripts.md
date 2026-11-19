@@ -102,9 +102,14 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award \
 
 ## Combat Script — `scripts/combat.py`
 ```bash
-# Roll initiative and print tracker
+# Roll initiative, print tracker, and send the turn order to the display
+# (the TV switches to combat mode). --no-push skips the display.
 python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py init '<JSON>'
 # JSON: [{"name":"Flerb","dex_mod":0,"hp":12,"ac":16,"type":"pc"}, ...]
+
+# End combat: clear the turn order (the TV leaves combat mode).
+# --clear-map -c <campaign> also deletes the battle map and takes it off the TV
+python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py end [--clear-map -c <campaign>]
 
 # Reprint tracker from saved state
 python3 ${CLAUDE_SKILL_DIR}/scripts/combat.py tracker '<JSON>' <round_num>
@@ -240,7 +245,8 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py \
   --factions '[{"name":"Pale Court","standing":"Allied"},{"name":"Watch","standing":"Neutral"}]'
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --factions '[]'   # clear all
 
-# Combat turn order (on /dm:dnd combat start):
+# Combat turn order: sent by `combat.py init` at combat start. Push it by
+# hand only to fix the order mid-fight (a creature joins or leaves):
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-order \
   '{"order":["Goblin 1","Flerb","Goblin 2"],"current":"Goblin 1","round":1}'
 
@@ -250,8 +256,7 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-current "Flerb"
 # New round:
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-current "Goblin 1" --turn-round 2
 
-# Combat ended:
-python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-clear
+# Combat ended: use `combat.py end` (same effect as --turn-clear).
 
 # World time clock:
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --world-time \
@@ -298,7 +303,7 @@ If `check_input.py` returns output, prepend it to the player's terminal input wh
 - Timed effect starts → `--effect-start "NAME:SPELL:DURATION[:conc]"` bundled with narration send
 - Timed effect ends → `--effect-end "NAME:SPELL"` bundled with narration send
 - Faction standing changes → `--factions '[...]'` (full replace)
-- Combat start → `--turn-order`; each turn → `--turn-current`; end → `--turn-clear`
+- Combat start → `combat.py init` (sends the order); each turn → `--turn-current`; end → `combat.py end`
 - Level up → push updated full stats
 - Long rest → restore HP, hit dice, spell slots, second wind; push `--world-time` with updated time
 - Any rest or time advance → push `--world-time`

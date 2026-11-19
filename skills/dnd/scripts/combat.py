@@ -361,6 +361,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("init", help="roll initiative for a JSON array of combatants")
     s.add_argument("combatants", help='JSON array of {"name","dex_mod","hp","ac","type"}')
+    s.add_argument("--no-push", action="store_true",
+                   help="don't send the turn order to the display")
+
+    s = sub.add_parser("end", help="end combat: clear the turn order on the display")
+    s.add_argument("--clear-map", action="store_true",
+                   help="also delete the campaign's battle map and take it off the display (needs -c)")
+    s.add_argument("-c", "--campaign", default=os.environ.get("CAMPAIGN"))
 
     s = sub.add_parser("tracker", help="print the tracker table from a JSON state blob")
     s.add_argument("state")
@@ -466,16 +473,22 @@ def _campaign_dir(name):
     return d
 
 
-def push_map(m: dict) -> None:
-    """Send the map to the display (silently nothing when it isn't running)."""
+def push_stats_json(payload: dict) -> None:
+    """Send one stats payload to the display through push_stats.py
+    (silently nothing when the display isn't running)."""
     import subprocess
-    import battlemap
     push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
     try:
-        subprocess.run([sys.executable, push, "--json", json.dumps({"map": battlemap.display_payload(m)})],
+        subprocess.run([sys.executable, push, "--json", json.dumps(payload)],
                        capture_output=True, timeout=20)
     except Exception:
         pass
+
+
+def push_map(m: dict) -> None:
+    """Send the map to the display (silently nothing when it isn't running)."""
+    import battlemap
+    push_stats_json({"map": battlemap.display_payload(m)})
 
 
 def _map_cmd(a) -> int:
@@ -554,11 +567,13 @@ def _map_cmd(a) -> int:
 
 
 def push_map_clear() -> None:
-    import subprocess
-    push = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "display", "push_stats.py")
+    push_stats_json({"map": None})
+
+
+def _push_quietly(payload: dict) -> None:
+    """Combat bookkeeping never fails because the display is down."""
     try:
-        subprocess.run([sys.executable, push, "--json", json.dumps({"map": None})],
-                       capture_output=True, timeout=20)
+        push_stats_json(payload)
     except Exception:
         pass
 
@@ -580,6 +595,24 @@ def main(argv=None) -> int:
             print(f"  {c['name']}: d20({c['initiative_roll']}) + {c.get('dex_mod',0)} = {c['initiative']}")
         print()
         print("STATE_JSON:", json.dumps(ordered))
+        # The display switches to combat mode on its own (spec D12).
+        if not a.no_push and ordered:
+            _push_quietly({"turn_order": {"order": [c["name"] for c in ordered],
+                                          "current": ordered[0]["name"], "round": 1}})
+
+    elif a.cmd == "end":
+        # One payload, so the display ends combat and drops the map together.
+        payload = {"turn_order": None}
+        if a.clear_map:
+            # Same as `map clear`: the file goes too, or the next token move
+            # would load the old map and put it back on the TV.
+            import battlemap as bm
+            p = bm.map_path(_campaign_dir(a.campaign))   # exits naming -c when none
+            if p.exists():
+                p.unlink()
+            payload["map"] = None
+        _push_quietly(payload)
+        print("Combat ended. Battle map cleared." if a.clear_map else "Combat ended.")
 
     elif a.cmd == "tracker":
         print_tracker(json.loads(a.state), a.round)
