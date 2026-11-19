@@ -249,3 +249,23 @@ optional mirror.**
 4. Phase 3.1–3.2 (positions and the TV map), then 3.3, with 3.4 only if the
    table still wants D&D Beyond Maps.
 5. Phase 4 alongside, as time allows.
+
+---
+
+## Phase 5 — display overhaul (specced via `/grill-me`)
+
+The foundation (new TV page, panels, combat mode, theme) is specced in
+`docs/specs/2026-11-17-display-foundation.md`. The other four are specced too
+(build order follows the dependencies):
+
+1. **Map** — `docs/specs/2026-11-17-battle-map.md` (approved): our own map,
+   fog from line of sight, moves timed to narration; attack sprites as
+   milestone 2. Needs the foundation's `/tv`.
+2. **Phone sheet** — `docs/specs/2026-11-18-phone-sheet.md` (approved):
+   `/phone`, automatic resource tracking, tap-to-roll; the Map tab waits for
+   Map milestone 1.
+3. **Pass the mic** — `docs/specs/2026-11-18-pass-the-mic.md` (approved):
+   hold-to-talk on `/phone`, auto-send with undo, queue, typing always there.
+4. **Scene backgrounds** — `docs/specs/2026-11-18-scene-backgrounds.md`
+   (approved): mood layers plus a picture of the place; starts with a Gemini
+   image trial.

@@ -1,0 +1,408 @@
+<title>MyDM Theme Mockups</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;1,7..72,400&family=Marcellus+SC&family=Alegreya:ital,wght@0,400;0,500;1,400&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Alegreya+Sans+SC:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Page chrome: a dark viewing room around a fixed 1920×1080 TV stage that scales to fit.
+   Single dark look on purpose — the mockup is a TV in a dim room. */
+:root {
+  --room: #0d0b0a;
+  --room-raised: #191512;
+  --room-line: #2c2621;
+  --room-ink: #ece5dc;
+  --room-dim: #a39787;
+  --room-accent: #e8a24c;
+  --ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+html, body { background: var(--room); color: var(--room-ink); }
+[hidden] { display: none !important; }
+body {
+  font-family: var(--ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1600px; margin: 0 auto; display: grid; gap: 18px; }
+header.top { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: end; justify-content: space-between; }
+header.top h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+header.top p { margin: 4px 0 0; color: var(--room-dim); max-width: 62ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--room-line); border-radius: 8px; overflow: hidden; background: var(--room-raised); }
+.seg button {
+  font: 500 14px var(--ui); color: var(--room-dim); background: none; border: 0;
+  padding: 8px 14px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--room-line); }
+.seg button[aria-pressed="true"] { color: var(--room) ; background: var(--room-accent); }
+.seg button:focus-visible, .plain:focus-visible { outline: 2px solid var(--room-accent); outline-offset: 2px; }
+.plain { font: 500 14px var(--ui); color: var(--room-ink); background: var(--room-raised); border: 1px solid var(--room-line); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--room-dim); }
+
+.screen { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; background: #000; border-radius: 6px; box-shadow: 0 0 0 1px var(--room-line), 0 30px 80px -30px #000; }
+.screen:fullscreen { border-radius: 0; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.note { border: 1px solid var(--room-line); border-radius: 8px; padding: 14px 16px; background: var(--room-raised); min-width: 0; }
+.note[data-on="true"] { border-color: var(--room-accent); }
+.note h2 { font-size: 16px; margin: 0 0 4px; }
+.note p { margin: 0; color: var(--room-dim); }
+.readout { color: var(--room-dim); font-variant-numeric: tabular-nums; }
+
+/* ─── The TV stage: authored at 1920×1080, scaled as one unit ─── */
+.stage {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+  transform-origin: 0 0; overflow: hidden;
+  font-family: var(--f-body); color: var(--ink);
+}
+.bg { position: absolute; inset: 0; background:
+  radial-gradient(ellipse 70% 60% at 35% 30%, #3a1b06 0%, transparent 70%),
+  linear-gradient(160deg, #1a0800, #2e1400); }
+.embers { position: absolute; inset: 0; width: 100%; height: 100%; }
+.vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 30%, rgba(0,0,0,.55) 70%, rgba(0,0,0,.88) 100%); }
+.ph-tag { position: absolute; right: 28px; bottom: 18px; font: 500 15px var(--ui); color: rgba(255,255,255,.38); letter-spacing: .04em; z-index: 5; }
+
+/* Theme tokens, per look */
+.stage[data-look="hearth"] {
+  --ink: #f4e8d6; --ink-dim: #c9b195; --accent: #f2a84e; --accent-soft: rgba(242,168,78,.18);
+  --npc: #f7c98a; --you: #9fd0c4; --hp: #8fcf86; --hp-low: #e5735a; --cond: #d9a6e8;
+  --panel: rgba(30,17,9,.60); --panel-line: rgba(255,196,130,.16); --radius: 22px;
+  --panel-blur: blur(16px);
+  --f-display: "Fraunces", Georgia, serif; --f-body: "Literata", Georgia, serif; --f-label: "Fraunces", Georgia, serif;
+  --label-case: none; --label-track: 0.01em; --label-style: italic; --label-size: 21px;
+  --map-floor: #2a2018; --map-line: rgba(255,210,160,.10); --map-wall: #120b07;
+}
+.stage[data-look="iron"] {
+  --ink: #e9e4d9; --ink-dim: #a29d91; --accent: #79bfa9; --accent-soft: rgba(121,191,169,.16);
+  --npc: #d8c38f; --you: #9cc6e4; --hp: #79bfa9; --hp-low: #e0664f; --cond: #d6a0e0;
+  --panel: linear-gradient(180deg, rgba(30,32,34,.94), rgba(18,19,20,.94)); --panel-line: #474c50; --radius: 3px;
+  --panel-blur: none;
+  --f-display: "Marcellus SC", "Times New Roman", serif; --f-body: "Alegreya", Georgia, serif; --f-label: "Marcellus SC", "Times New Roman", serif;
+  --label-case: uppercase; --label-track: 0.16em; --label-style: normal; --label-size: 17px;
+  --map-floor: #24262a; --map-line: rgba(200,220,215,.10); --map-wall: #0b0c0d;
+}
+.stage[data-look="ink"] {
+  --ink: #f1ebe1; --ink-dim: #b6aa98; --accent: #e06a55; --accent-soft: rgba(224,106,85,.16);
+  --npc: #f0c89b; --you: #a9cfe0; --hp: #c8d79a; --hp-low: #e06a55; --cond: #d7a9df;
+  --panel: transparent; --panel-line: rgba(241,235,225,.22); --radius: 0;
+  --panel-blur: none;
+  --f-display: "EB Garamond", Garamond, Georgia, serif; --f-body: "EB Garamond", Garamond, Georgia, serif; --f-label: "Alegreya Sans SC", "Gill Sans", sans-serif;
+  --label-case: none; --label-track: 0.08em; --label-style: normal; --label-size: 19px;
+  --map-floor: #201914; --map-line: rgba(241,235,225,.08); --map-wall: #0a0705;
+}
+
+/* The pick: Ink & Margin's look with Hearthlight's type */
+.stage[data-type="hearth"] {
+  --f-display: "Fraunces", Georgia, serif; --f-body: "Literata", Georgia, serif; --f-label: "Fraunces", Georgia, serif;
+  --label-case: none; --label-track: 0.01em; --label-style: italic; --label-size: 21px;
+}
+
+.layer { position: absolute; inset: 0; z-index: 3; }
+.panel {
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: var(--radius);
+  backdrop-filter: var(--panel-blur); -webkit-backdrop-filter: var(--panel-blur);
+  padding: 26px 28px; display: grid; gap: 18px; align-content: start; min-width: 0; position: relative;
+}
+.stage[data-look="iron"] .panel { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 30px rgba(0,0,0,.45); }
+.stage[data-look="iron"] .panel::before, .stage[data-look="iron"] .panel::after {
+  content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #8c9296, #3a3e41); top: 10px; left: 10px;
+}
+.stage[data-look="iron"] .panel::after { left: auto; right: 10px; }
+.stage[data-look="ink"] .panel { border: 0; padding: 18px 8px; text-shadow: 0 2px 12px rgba(0,0,0,.9); }
+.stage[data-look="ink"] .side-l { border-right: 1px solid var(--panel-line); padding-right: 28px; }
+.stage[data-look="ink"] .side-r { border-left: 1px solid var(--panel-line); padding-left: 28px; }
+
+.mod-title { font-family: var(--f-label); font-size: var(--label-size); text-transform: var(--label-case); letter-spacing: var(--label-track); font-style: var(--label-style); color: var(--accent); margin: 0; }
+.mod + .mod { padding-top: 22px; border-top: 1px solid var(--panel-line); }
+.mod { display: grid; gap: 14px; }
+
+/* Party */
+.pc { display: grid; gap: 6px; }
+.pc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.pc-name { font-family: var(--f-display); font-size: 28px; line-height: 1.1; }
+.pc-hp { font-size: 24px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.pc-hp b { color: var(--ink); font-weight: 500; }
+.bar { height: 8px; border-radius: 99px; background: rgba(255,255,255,.10); overflow: hidden; }
+.stage[data-look="iron"] .bar { border-radius: 1px; height: 10px; }
+.bar i { display: block; height: 100%; background: var(--hp); border-radius: inherit; }
+.bar i.low { background: var(--hp-low); }
+.pc-meta { font-size: 20px; color: var(--ink-dim); display: flex; gap: 10px; flex-wrap: wrap; }
+.chip { font-size: 18px; padding: 2px 10px; border-radius: 99px; border: 1px solid currentColor; color: var(--cond); line-height: 1.4; }
+.stage[data-look="iron"] .chip { border-radius: 2px; text-transform: uppercase; letter-spacing: .1em; font-size: 15px; }
+
+/* Quests & clock */
+.quest { font-size: 24px; line-height: 1.35; display: grid; gap: 2px; }
+.quest small { font-size: 19px; color: var(--ink-dim); }
+.quest.done { color: var(--ink-dim); text-decoration: line-through; text-decoration-color: var(--panel-line); }
+.clock { font-family: var(--f-display); font-size: 40px; line-height: 1.1; }
+.clock small { display: block; font-family: var(--f-body); font-size: 21px; color: var(--ink-dim); margin-top: 6px; }
+.effect { font-size: 21px; color: var(--ink-dim); display: flex; justify-content: space-between; }
+.effect b { font-weight: 500; color: var(--ink); }
+
+/* Narration */
+.narr { display: grid; align-content: end; gap: 26px; font-size: 31px; line-height: 1.5; min-width: 0; }
+.narr p { margin: 0; text-wrap: pretty; }
+.narr .old { color: var(--ink-dim); }
+.npc { border-left: 3px solid var(--npc); padding-left: 24px; }
+.npc .who { font-family: var(--f-label); font-size: var(--label-size); text-transform: var(--label-case); letter-spacing: var(--label-track); font-style: var(--label-style); color: var(--npc); display: block; margin-bottom: 4px; }
+.npc q { color: var(--npc); quotes: "“" "”"; font-style: italic; }
+.you { color: var(--you); font-style: italic; }
+.you .who { font-style: normal; font-family: var(--f-label); font-size: var(--label-size); text-transform: var(--label-case); letter-spacing: var(--label-track); margin-right: 10px; }
+.roll { display: flex; align-items: center; gap: 22px; padding: 18px 24px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); font-size: 28px; }
+.stage[data-look="ink"] .roll { border-width: 1px 0; border-radius: 0; }
+.roll .die { font-family: var(--f-display); font-size: 26px; color: var(--accent); border: 2px solid var(--accent); width: 62px; height: 62px; display: grid; place-items: center; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.roll small { display: block; font-size: 21px; color: var(--ink-dim); }
+.caret { display: inline-block; width: 3px; height: 1.05em; background: var(--accent); vertical-align: -0.15em; margin-left: 4px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.hit { font-family: var(--f-label); font-size: 23px; letter-spacing: .03em; color: var(--ink-dim); display: flex; gap: 14px; align-items: center; }
+.hit b { color: var(--hp-low); font-weight: 500; }
+
+.inputbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; font-size: 24px; color: var(--ink-dim); }
+.inputbar .wait b { color: var(--ink); font-weight: 500; }
+.pips { display: flex; gap: 12px; }
+.pip { font-size: 20px; padding: 4px 14px; border-radius: 99px; border: 1px solid var(--panel-line); }
+.pip.on { border-color: var(--accent); color: var(--accent); }
+.stage[data-look="iron"] .pip { border-radius: 2px; }
+
+.scene { font-family: var(--f-display); font-size: 26px; letter-spacing: .04em; color: var(--ink-dim); text-align: center; }
+.scene em { color: var(--accent); font-style: normal; }
+
+/* Story layout */
+.story { display: grid; grid-template-columns: 420px 1fr 420px; grid-template-rows: auto 1fr auto; gap: 26px 44px; padding: 40px 48px 36px; }
+.story .scene { grid-column: 2; }
+.story .side-l { grid-column: 1; grid-row: 1 / 4; }
+.story .side-r { grid-column: 3; grid-row: 1 / 4; }
+.story .narr { grid-column: 2; grid-row: 2; padding: 0 12px; }
+.story .inputbar { grid-column: 2; grid-row: 3; padding: 14px 12px 0; border-top: 1px solid var(--panel-line); }
+
+/* Combat layout: map 60% left, narration column right, turn bar on top */
+.combat { display: grid; grid-template-columns: 1120px 1fr; grid-template-rows: auto 1fr; gap: 22px 30px; padding: 28px 40px 36px; }
+.turnbar { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; padding: 12px 18px; }
+.turnbar .round { font-family: var(--f-display); font-size: 26px; color: var(--ink-dim); margin-right: 10px; white-space: nowrap; }
+.tok { display: flex; align-items: center; gap: 12px; font-size: 25px; padding: 8px 18px 8px 10px; border-radius: 99px; border: 1px solid transparent; white-space: nowrap; color: var(--ink-dim); }
+.stage[data-look="iron"] .tok { border-radius: 2px; }
+.tok .dot { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 16px var(--ui); color: #120c08; background: var(--you); }
+.tok.foe .dot { background: var(--hp-low); }
+.tok.now { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
+.tok.now::after { content: "turn"; font-family: var(--f-label); font-size: 17px; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); }
+.mapbox { grid-row: 2; padding: 0; overflow: hidden; }
+.mapbox canvas { width: 100%; height: 100%; display: block; border-radius: var(--radius); }
+.stage[data-look="ink"] .mapbox { box-shadow: 0 0 0 1px var(--panel-line); }
+.col { grid-row: 2; display: grid; grid-template-rows: auto 1fr; gap: 22px; min-width: 0; }
+.party-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 18px 22px; }
+.party-strip .pc-name { font-size: 23px; }
+.party-strip .pc-hp { font-size: 20px; }
+.party-strip .bar { height: 6px; }
+.combat .narr { font-size: 30px; gap: 22px; padding: 6px 6px 0; overflow: hidden; mask-image: linear-gradient(to bottom, transparent 0, #000 90px); -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 90px); }
+
+@media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+@media (max-width: 640px) { header.top h1 { font-size: 19px; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>MyDM display — three theme directions</h1>
+      <p>The same story and combat screens from the display spec, drawn at TV size (1920×1080) and scaled to your screen. The background is the current one, kept as a placeholder until the Scene backgrounds spec.</p>
+    </div>
+    <div class="controls" role="toolbar" aria-label="Mockup controls">
+      <span class="label" id="lk">Theme</span>
+      <div class="seg" aria-labelledby="lk">
+        <button type="button" id="look-pick" data-look="pick" aria-pressed="true">Your pick · C + A type</button>
+        <button type="button" id="look-hearth" data-look="hearth" aria-pressed="false">A · Hearthlight</button>
+        <button type="button" id="look-iron" data-look="iron" aria-pressed="false">B · Ironbound</button>
+        <button type="button" id="look-ink" data-look="ink" aria-pressed="false">C · Ink &amp; Margin</button>
+      </div>
+      <span class="label" id="md">Mode</span>
+      <div class="seg" aria-labelledby="md">
+        <button type="button" id="mode-story" data-mode="story" aria-pressed="true">Story</button>
+        <button type="button" id="mode-combat" data-mode="combat" aria-pressed="false">Combat</button>
+      </div>
+      <button type="button" class="plain" id="fs">Fullscreen on this screen</button>
+    </div>
+  </header>
+
+  <div class="screen" id="screen">
+    <div class="stage" id="stage" data-look="ink" data-type="hearth" data-mode="story">
+      <div class="bg"></div>
+      <canvas class="embers" id="embers" width="1920" height="1080"></canvas>
+      <div class="vig"></div>
+
+      <!-- STORY -->
+      <div class="layer story" id="story">
+        <div class="scene">— <em>The Drowned Lantern</em> —</div>
+
+        <aside class="panel side-l">
+          <section class="mod">
+            <h3 class="mod-title">Party</h3>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Thorne</span><span class="pc-hp"><b>31</b> / 44</span></div><div class="bar"><i style="width:70%"></i></div><div class="pc-meta">Fighter 4 · AC 18</div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Mira</span><span class="pc-hp"><b>18</b> / 22</span></div><div class="bar"><i style="width:82%"></i></div><div class="pc-meta">Wizard 4 · AC 12 <span class="chip">Concentrating</span></div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Bram</span><span class="pc-hp"><b>27</b> / 30</span></div><div class="bar"><i style="width:90%"></i></div><div class="pc-meta">Cleric 4 · AC 16</div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Kess</span><span class="pc-hp"><b>9</b> / 27</span></div><div class="bar"><i class="low" style="width:33%"></i></div><div class="pc-meta">Rogue 4 · AC 15 <span class="chip">Poisoned</span></div></div>
+          </section>
+        </aside>
+
+        <div class="narr" aria-label="Narration">
+          <p class="old">Rain needles the shutters of the Drowned Lantern. The common room smells of wet wool and peat smoke, and every head that turned when you came in has slowly turned back to its cup.</p>
+          <div class="npc"><span class="who">Odessa, the innkeeper</span><q>You’re the ones who pulled the Harrow boy out of the weir. Sit. The stew’s free tonight. The questions aren’t.</q></div>
+          <p class="you"><span class="who">Kess</span>I drift toward the cellar door and listen.</p>
+          <p>Behind the bar, a cellar door you hadn’t noticed stands a finger’s width open. Something below is dragging, slow and patient, across stone<span class="caret" aria-hidden="true"></span></p>
+          <div class="roll"><span class="die">d20</span><div>Kess, roll <b>Dexterity (Stealth)</b><small>+7 · tap Roll on your phone, or roll real dice</small></div></div>
+        </div>
+
+        <div class="inputbar">
+          <span class="wait">Waiting on <b>Kess</b></span>
+          <span class="pips"><span class="pip">Thorne</span><span class="pip">Mira</span><span class="pip">Bram</span><span class="pip on">Kess</span></span>
+        </div>
+
+        <aside class="panel side-r">
+          <section class="mod">
+            <h3 class="mod-title">Quests</h3>
+            <div class="quest">Find what took the Harrow boy<small>He spoke of “lanterns under the water.”</small></div>
+            <div class="quest">Return Brother Aldous’s reliquary<small>Owed to the chapel at Fenmarch</small></div>
+            <div class="quest done">Cross the Weir before the flood</div>
+          </section>
+          <section class="mod">
+            <h3 class="mod-title">World clock</h3>
+            <div class="clock">Day 3 · Dusk<small>Heavy rain · the road east is flooding</small></div>
+          </section>
+          <section class="mod">
+            <h3 class="mod-title">Effects</h3>
+            <div class="effect"><span>Mage Armor · Mira</span><b>7 h</b></div>
+            <div class="effect"><span>Poisoned · Kess</span><b>40 min</b></div>
+          </section>
+        </aside>
+      </div>
+
+      <!-- COMBAT -->
+      <div class="layer combat" id="combat" hidden>
+        <div class="panel turnbar" aria-label="Turn order">
+          <span class="round">Round 2</span>
+          <span class="tok now"><span class="dot">K</span>Kess</span>
+          <span class="tok foe"><span class="dot">G1</span>Ghoul</span>
+          <span class="tok"><span class="dot">T</span>Thorne</span>
+          <span class="tok"><span class="dot">M</span>Mira</span>
+          <span class="tok foe"><span class="dot">G2</span>Ghoul</span>
+          <span class="tok"><span class="dot">B</span>Bram</span>
+        </div>
+        <div class="panel mapbox"><canvas id="map" width="1120" height="910" aria-label="Battle map of the inn cellar stairs"></canvas></div>
+        <div class="col">
+          <div class="panel party-strip">
+            <div class="pc"><div class="pc-top"><span class="pc-name">Thorne</span><span class="pc-hp"><b>24</b>/44</span></div><div class="bar"><i style="width:55%"></i></div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Mira</span><span class="pc-hp"><b>18</b>/22</span></div><div class="bar"><i style="width:82%"></i></div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Bram</span><span class="pc-hp"><b>27</b>/30</span></div><div class="bar"><i style="width:90%"></i></div></div>
+            <div class="pc"><div class="pc-top"><span class="pc-name">Kess</span><span class="pc-hp"><b>9</b>/27</span></div><div class="bar"><i class="low" style="width:33%"></i></div></div>
+          </div>
+          <div class="narr" aria-label="Narration">
+            <p class="old">The cellar door bursts outward. Two ghouls spill up the steps, nails clicking on the flagstones, and the nearest lunges for Thorne’s throat.</p>
+            <div class="hit">Ghoul → Thorne · 14 to hit · <b>7 slashing</b></div>
+            <p class="old">Thorne staggers but holds the line, shield up. Behind him, Kess is already gone from where she stood.</p>
+            <p>The second ghoul has its back to you, Kess, sniffing at the bar where Odessa hides. What do you do?<span class="caret" aria-hidden="true"></span></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="ph-tag">Background: current, placeholder</div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note" data-for="pick" data-on="true"><h2>Your pick · Ink &amp; Margin with Hearthlight type</h2><p>C’s open, boxless layout and deep red accent, set in A’s Fraunces headings, Literata body text and italic labels.</p></div>
+    <div class="note" data-for="hearth" data-on="false"><h2>A · Hearthlight</h2><p>Warm and soft. Frosted glass panels with round corners, a bookish serif and amber accents. Feels like a lit room around a table.</p></div>
+    <div class="note" data-for="iron" data-on="false"><h2>B · Ironbound</h2><p>Hard-edged. Dark iron plates with rivets, carved small capitals for labels and a verdigris-green accent. Feels like a game table’s tools.</p></div>
+    <div class="note" data-for="ink" data-on="false"><h2>C · Ink &amp; Margin</h2><p>Almost no boxes. Text sits on the background with thin rules between columns and an oxblood accent. Feels like reading a book, and lets the background carry the mood.</p></div>
+  </div>
+  <p class="readout" id="readout"></p>
+</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const screen = document.getElementById('screen');
+  const readout = document.getElementById('readout');
+
+  function fit() {
+    const w = screen.clientWidth;
+    const s = w / 1920;
+    stage.style.transform = `scale(${s})`;
+    const px = Math.round(w * (window.devicePixelRatio || 1));
+    readout.textContent = `TV stage drawn at 1920×1080, scaled ×${s.toFixed(2)} (about ${px} device pixels wide). At 4K the same layout is drawn at ×2.00, so text stays sharp.`;
+  }
+  new ResizeObserver(fit).observe(screen);
+  fit();
+
+  function setPressed(attr, val) {
+    document.querySelectorAll(`button[data-${attr}]`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === val)));
+  }
+  document.querySelectorAll('button[data-look]').forEach(b => b.addEventListener('click', () => {
+    const pick = b.dataset.look === 'pick';
+    stage.dataset.look = pick ? 'ink' : b.dataset.look;
+    if (pick) stage.dataset.type = 'hearth'; else delete stage.dataset.type;
+    setPressed('look', b.dataset.look);
+    document.querySelectorAll('.note').forEach(n => n.dataset.on = String(n.dataset.for === b.dataset.look));
+    drawMap();
+  }));
+  document.querySelectorAll('button[data-mode]').forEach(b => b.addEventListener('click', () => {
+    const combat = b.dataset.mode === 'combat';
+    stage.dataset.mode = b.dataset.mode; setPressed('mode', b.dataset.mode);
+    document.getElementById('story').hidden = combat;
+    document.getElementById('combat').hidden = !combat;
+    drawMap();
+  }));
+  document.getElementById('fs').addEventListener('click', () => {
+    if (screen.requestFullscreen) screen.requestFullscreen().catch(() => {});
+  });
+
+  // Battle map: the inn's common room with the cellar stair, drawn from theme tokens
+  function drawMap() {
+    const c = document.getElementById('map'); const g = c.getContext('2d');
+    const css = getComputedStyle(stage); const v = n => css.getPropertyValue(n).trim();
+    const W = c.width, H = c.height, S = 70, cols = 16, rows = 13, ox = 0, oy = 0;
+    g.fillStyle = v('--map-wall'); g.fillRect(0, 0, W, H);
+    g.fillStyle = v('--map-floor'); g.fillRect(S, S, (cols - 2) * S, (rows - 2) * S);
+    // bar counter and cellar stair
+    g.fillStyle = v('--map-wall'); g.fillRect(9 * S, 3 * S, 5 * S, S * 0.7);
+    g.fillStyle = 'rgba(0,0,0,.45)';
+    for (let i = 0; i < 4; i++) g.fillRect(12 * S, (5 + i) * S, 2 * S, S - 6);
+    // tables
+    g.fillStyle = 'rgba(0,0,0,.35)';
+    [[3,3],[3,8],[6,10]].forEach(([x,y]) => { g.beginPath(); g.arc((x+.5)*S, (y+.5)*S, S*.75, 0, 7); g.fill(); });
+    // grid
+    g.strokeStyle = v('--map-line'); g.lineWidth = 1;
+    for (let x = 1; x < cols; x++) { g.beginPath(); g.moveTo(x*S+.5, S); g.lineTo(x*S+.5, (rows-1)*S); g.stroke(); }
+    for (let y = 1; y < rows; y++) { g.beginPath(); g.moveTo(S, y*S+.5); g.lineTo((cols-1)*S, y*S+.5); g.stroke(); }
+    // labels
+    g.fillStyle = v('--ink-dim'); g.font = `22px ${v('--f-label')}`;
+    g.fillText('Bar', 9.2*S, 2.75*S); g.fillText('Cellar stair', 11.6*S, 9.7*S);
+    // tokens
+    const tok = (x, y, label, color, now) => {
+      const cx = (x+.5)*S, cy = (y+.5)*S;
+      if (now) { g.strokeStyle = v('--accent'); g.lineWidth = 5; g.beginPath(); g.arc(cx, cy, S*.46, 0, 7); g.stroke(); }
+      g.fillStyle = color; g.beginPath(); g.arc(cx, cy, S*.36, 0, 7); g.fill();
+      g.fillStyle = '#120c08'; g.font = '600 20px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(label, cx, cy); g.textAlign = 'start'; g.textBaseline = 'alphabetic';
+    };
+    tok(10, 7, 'T', v('--you')); tok(5, 6, 'M', v('--you')); tok(6, 8, 'B', v('--you'));
+    tok(8, 4, 'K', v('--you'), true);
+    tok(11, 7, 'G1', v('--hp-low')); tok(10, 4, 'G2', v('--hp-low'));
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawMap);
+  drawMap();
+
+  // Embers: the current background's particles, as a placeholder
+  const ec = document.getElementById('embers'); const eg = ec.getContext('2d');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const P = Array.from({ length: 70 }, () => ({ x: Math.random()*1920, y: Math.random()*1080, r: 1 + Math.random()*2.4, s: .3 + Math.random()*.9, d: Math.random()*6.28 }));
+  function frame() {
+    eg.clearRect(0, 0, 1920, 1080);
+    for (const p of P) {
+      if (!reduce) { p.y -= p.s; p.d += .01; p.x += Math.sin(p.d) * .4; if (p.y < -10) { p.y = 1090; p.x = Math.random()*1920; } }
+      eg.fillStyle = `rgba(255,${120 + (p.r*30|0)},50,${.25 + p.r/6})`;
+      eg.beginPath(); eg.arc(p.x, p.y, p.r, 0, 7); eg.fill();
+    }
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
