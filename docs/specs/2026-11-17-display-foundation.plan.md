@@ -98,7 +98,7 @@ status: approved      # proposed → approved
 **Combat mode.**
 - The mode is computed on the TV by `layout.resolve`:
   - The host's override wins if one is set.
-  - Otherwise a set `turn_order` means combat: with a map when `stats.map` is set, without one otherwise.
+  - Otherwise a `turn_order` whose `order` names at least one combatant means combat: with a map when `stats.map` is set, without one otherwise. A bare `{"current": …}` or `{"order": []}` is not combat (same rule as the server's `_combat_on`, added in S4).
   - Otherwise the saved layout applies.
 - The override is runtime-only and is set through `POST /display-mode {"combat": true|false|null}`.
 - The server clears the override whenever `turn_order` goes from empty to set or back, so the automatic switch resumes (D9).

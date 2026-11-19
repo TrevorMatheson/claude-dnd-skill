@@ -1409,6 +1409,14 @@ def _display_config() -> dict:
         return copy.deepcopy(_display_cache["config"])
 
 
+def _combat_on(turn_order) -> bool:
+    """Combat is on only while the turn order names someone. A bare
+    {"current": …} or {"order": []} is not a fight to show."""
+    return (isinstance(turn_order, dict)
+            and isinstance(turn_order.get("order"), list)
+            and len(turn_order["order"]) > 0)
+
+
 def _display_payload() -> dict:
     return {"display": {"config": _display_config(), "mode_override": _mode_override}}
 
@@ -1446,6 +1454,24 @@ def display_config_post():
         _display_cache["campaign"] = _active_campaign_name()
     _broadcast(_display_payload())
     return jsonify(config=clean, saved=bool(folder))
+
+
+@app.route("/display-mode", methods=["POST"])
+def display_mode_post():
+    """The host forces the TV into combat (true) or story (false), or hands it
+    back to the automatic switch (null). Cleared whenever combat starts or ends."""
+    global _mode_override
+    if not _host_only():
+        return jsonify(error="Open this on the computer running the game."), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "combat" not in data:
+        return jsonify(error='Send {"combat": true, false or null}.'), 400
+    value = data["combat"]
+    if value is not None and not isinstance(value, bool):
+        return jsonify(error='"combat" must be true, false or null.'), 400
+    _mode_override = value
+    _broadcast(_display_payload())
+    return jsonify(mode_override=_mode_override)
 
 
 @app.route("/icons/<path:filename>")
@@ -1722,6 +1748,7 @@ def stats():
     data = request.get_json(silent=True) or {}
     if not data:
         return "", 204
+    _combat_flipped = False   # set when the turn order goes empty↔set
 
     if "awaiting" in data:
         global _awaiting
@@ -1857,14 +1884,24 @@ def stats():
                         {k: v for k, v in incoming.items() if k not in _MUTATION_KEYS}
                     )
 
-        # turn_order replaces entirely (None = clear); also ticks round-based effects
+        # turn_order: a dict with "order" replaces the whole thing (a new fight);
+        # one without it ({"current": …} / {"round": …}) updates those fields and
+        # keeps the order, so a screen that reconnects mid-fight still has every
+        # name. None clears. Also ticks round-based effects.
         _effect_expire_events: list[dict] = []
         if "turn_order" in data:
-            new_to = data["turn_order"]
+            sent_to = data["turn_order"]
+            old_to = _current_stats.get("turn_order")
+            new_to = sent_to
+            if isinstance(sent_to, dict) and "order" not in sent_to and isinstance(old_to, dict):
+                new_to = {**old_to, **sent_to}
             _current_stats["turn_order"] = new_to
+            if _combat_on(old_to) != _combat_on(new_to):
+                _combat_flipped = True
             # Decrement round-based effects for the actor whose turn just started
-            if new_to and isinstance(new_to, dict) and new_to.get("current"):
-                actor = new_to["current"].lower()
+            # (only when this update names whose turn it is)
+            if new_to and isinstance(sent_to, dict) and sent_to.get("current"):
+                actor = sent_to["current"].lower()
                 for p in _current_stats.get("players", []):
                     if p.get("name", "").lower() != actor:
                         continue
@@ -2006,6 +2043,13 @@ def stats():
     # Broadcast any round-based effect expiries after the stats update
     for evt in _effect_expire_events:
         _broadcast({"effect_expired": evt})
+
+    # Combat started or ended: a manual combat/story choice from the laptop
+    # lasts only until then, so the TV goes back to switching by itself (D9).
+    if _combat_flipped:
+        global _mode_override
+        _mode_override = None
+        _broadcast(_display_payload())
 
     # Update expected player count for staged-input auto-trigger
     global _expected_count
