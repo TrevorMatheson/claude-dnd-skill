@@ -225,7 +225,7 @@ status: approved      # proposed → approved
     - It hides the badge on open.
     - It applies the `seq`/`epoch` rules from Shape.
   - `feed.js` renders, in order: narration, NPC, player, action, dice, tutor, inspiration, milestone, XP and effect-expired blocks.
-    - It ports the deferral queue so blocks never land mid-word (`index.html:5523-5583`) and the markdown parsing.
+    - It ports the markdown parsing (bold, italic, paragraphs). *As built:* blocks appear whole in S6; the typewriter and its deferral queue (`index.html:5523-5583`) only matter once text types out, so they arrive with the voice-paced reveal in S9.
     - Pending `dice_request` and `dice_pending` show as a roll card that stays directly after the newest block, removed on cancel or completion.
     - The ↶ appears on the newest player or action block, with a two-tap confirm and `POST /rewind` (`index.html:5604-5652`).
     - `rewind` and `clear` events re-render the feed.

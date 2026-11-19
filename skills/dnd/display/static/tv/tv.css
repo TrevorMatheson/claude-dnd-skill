@@ -8,19 +8,109 @@ body { font-family: var(--f-body); overflow: hidden; }
 
 .stage { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
 
-/* Background layer (D14): the current scene background, placeholder until
-   the Scene backgrounds spec. The full scene code arrives in bg.js (S6). */
-.bg {
-  position: absolute; inset: 0; z-index: 0;
-  background:
-    radial-gradient(ellipse 70% 60% at 35% 30%, #3a1b06 0%, transparent 70%),
-    linear-gradient(160deg, #1a0800, #2e1400);
-}
+/* ── Background (D14): the old page's layers, copied unchanged, as a
+      placeholder until the Scene backgrounds spec. ── */
+#tv-bg { position: absolute; inset: 0; z-index: 0; }
+.bg-layer { position: absolute; inset: 0; transition: opacity 2.5s ease; pointer-events: none; }
+#bg-a { opacity: 1; }
+#bg-b { opacity: 0; }
+#sky { position: absolute; top: 0; left: 0; width: 100%; height: 42vh; pointer-events: none; }
+#particles { position: absolute; inset: 0; pointer-events: none; }
 .vig {
   position: absolute; inset: 0; z-index: 2; pointer-events: none;
   background: radial-gradient(ellipse at 50% 45%, transparent 30%, rgba(0,0,0,.55) 70%, rgba(0,0,0,.88) 100%);
 }
-.layer { position: absolute; inset: 0; z-index: 3; text-shadow: var(--text-shadow); }
+
+.layer {
+  position: absolute; inset: 0; z-index: 3;
+  display: grid; grid-template-rows: auto 1fr; gap: 1.5rem;
+  padding: 2.5rem 3rem 2.25rem;
+  text-shadow: var(--text-shadow);
+}
+
+.scene {
+  font-family: var(--f-display); font-size: 1.625rem; letter-spacing: .04em;
+  color: var(--ink-dim); text-align: center; transition: opacity .8s ease;
+}
+.scene.changing { opacity: 0; transition: opacity .4s ease; }
+
+/* ── The story feed. Until the panels arrive (S7) it is one centred column;
+      the newest block sits at the bottom and older ones scroll up and fade. ── */
+.feed {
+  justify-self: center; width: min(100%, 56rem); min-height: 0;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 1.625rem;
+  overflow: hidden;
+  font-size: var(--narr-size); line-height: 1.5;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 6rem);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 6rem);
+}
+.block { position: relative; text-wrap: pretty; }
+.block p { margin: 0; }
+.block p + p { margin-top: .75em; }
+.block.narr.old, .block.dice.old, .block.note.old, .block.tutor.old { color: var(--ink-dim); }
+.block.npc.old, .block.you.old { opacity: .8; }
+.block .who {
+  font-family: var(--f-label); font-size: var(--label-size); font-style: var(--label-style);
+  letter-spacing: var(--label-track); text-transform: var(--label-case);
+}
+.block.npc { border-left: 3px solid var(--npc); padding-left: 1.5rem; }
+.block.npc .who { color: var(--npc); display: block; margin-bottom: .25rem; }
+.block.npc q { color: var(--npc); font-style: italic; quotes: "“" "”"; }
+.block.you { color: var(--you); font-style: italic; }
+.block.you .who { font-style: normal; margin-right: .625rem; }
+.block.dice, .block.note {
+  font-family: var(--f-label); font-size: 1.4375rem; letter-spacing: .03em; color: var(--ink-dim);
+}
+.block.tutor { font-size: 1.5rem; color: var(--ink-dim); border-left: 1px solid var(--panel-line); padding-left: 1.25rem; }
+.block .why { color: var(--ink-dim); font-style: italic; }
+
+/* The ↶ on the newest player action: one tap arms it, a second undoes the turn. */
+.rewind-btn {
+  margin-left: .75rem; padding: .125rem .625rem;
+  font: inherit; font-size: 1.25rem; font-style: normal; color: var(--ink-dim);
+  background: none; border: 1px solid transparent; border-radius: .25rem; cursor: pointer; opacity: .55;
+}
+.rewind-btn:hover, .rewind-btn:focus-visible { opacity: 1; border-color: var(--panel-line); outline: none; }
+.rewind-btn.armed { opacity: 1; color: var(--accent); border-color: var(--accent); }
+
+/* The roll card: a pending roll request, always after the newest block. */
+.roll-card {
+  display: flex; align-items: center; gap: 1.375rem; padding: 1.125rem .5rem;
+  border-top: 1px solid var(--accent); border-bottom: 1px solid var(--accent);
+  background: var(--accent-soft); font-size: 1.75rem;
+}
+.roll-card .die {
+  flex: none; display: grid; place-items: center; width: 3.875rem; height: 3.875rem;
+  font-family: var(--f-display); font-size: 1.625rem; color: var(--accent); border: 2px solid var(--accent);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.roll-card small { display: block; font-size: 1.3125rem; color: var(--ink-dim); }
+
+/* ── Phone-approval cards (D24), top right. ── */
+.devices {
+  position: absolute; top: 1.5rem; right: 1.5rem; z-index: 6;
+  display: grid; gap: .75rem; width: 26rem;
+}
+.device-card {
+  display: grid; grid-template-columns: 1fr auto auto; gap: .5rem .75rem; align-items: center;
+  padding: 1rem 1.125rem; background: rgba(10, 7, 5, .85);
+  border: 1px solid var(--panel-line); font-size: 1.25rem;
+}
+.device-card-label { grid-column: 1 / -1; font-family: var(--f-label); font-style: italic; color: var(--accent); }
+.device-card-ip { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.device-card button {
+  font: inherit; font-size: 1.125rem; padding: .375rem .875rem; cursor: pointer;
+  color: var(--ink); background: none; border: 1px solid var(--panel-line);
+}
+.device-card .device-approve-btn { border-color: var(--accent); color: var(--accent); }
+.device-card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── "Reconnecting…" badge (AC12), top left, clear of the feed and roll card. ── */
+.reconnect {
+  position: absolute; left: 1.5rem; top: 1.5rem; z-index: 7;
+  padding: .5rem 1.25rem; font-size: 1.25rem; font-style: italic; color: var(--ink);
+  background: rgba(10, 7, 5, .85); border: 1px solid var(--accent);
+}
 
 [hidden] { display: none !important; }
 

@@ -15,10 +15,29 @@
 </head>
 <body>
 <main id="tv-stage" class="stage" data-mode="story">
-  <div id="tv-bg" class="bg" aria-hidden="true"></div>
+  <!-- Background (D14): the old page's scene layers, a placeholder until the
+       Scene backgrounds spec. Driven by bg.js. -->
+  <div id="tv-bg" aria-hidden="true">
+    <div id="bg-a" class="bg-layer"></div>
+    <div id="bg-b" class="bg-layer"></div>
+    <canvas id="sky"></canvas>
+    <canvas id="particles"></canvas>
+  </div>
   <div class="vig" aria-hidden="true"></div>
-  <div id="tv-layer" class="layer"></div>
+
+  <div id="tv-layer" class="layer">
+    <div id="scene-indicator" class="scene">— The Inn —</div>
+    <section id="tv-feed" class="feed" aria-label="Story" aria-live="polite"></section>
+  </div>
+
+  <div id="tv-devices" class="devices" hidden aria-label="Phones asking to join"></div>
+  <div id="tv-reconnect" class="reconnect" hidden role="status">Reconnecting…</div>
 </main>
+<script src="/static/tv/tv-boot.js"></script>
+<script src="/static/tv/stream.js"></script>
+<script src="/static/tv/feed.js"></script>
+<script src="/static/tv/devices.js"></script>
+<script src="/static/tv/bg.js"></script>
 <script src="/static/tv/tv.js"></script>
 </body>
 </html>
