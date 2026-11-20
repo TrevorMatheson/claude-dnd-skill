@@ -2548,7 +2548,10 @@ def _tts_key_watch(interval: float = 30.0) -> None:
         except Exception:
             fp = ""
         with _voice_lock:
-            due = (not _voice["on"]) and _voice_next_check and _time.time() >= _voice_next_check
+            # Gemini's own state, not the combined one: with Kokoro up the
+            # voice stays on while Gemini waits out a quota, and Gemini must
+            # still be checked again when the wait is over.
+            due = (not _gemini_state["on"]) and _voice_next_check and _time.time() >= _voice_next_check
         if fp != _voice_key_fp or due:
             _voice_check()
 
@@ -2749,8 +2752,10 @@ def tts_synthesize():
                 global _voice_next_check
                 _gemini_state["on"], _gemini_state["reason"] = False, _quota_reason(wait)
                 _voice_next_check = _time.time() + wait
-                # For the laptop page only (D17): the TV shows nothing.
-                _voice_note_set(wait)
+                # For the laptop page only (D17): the TV shows nothing. A
+                # per-minute limit clears in seconds and gets no note.
+                if e.daily_quota:
+                    _voice_note_set(wait)
                 return _local(voice)
             _broadcast({"tts_quota": {"daily": e.daily_quota, "retry_after": int(wait),
                                       "quota": e.quota_id}})

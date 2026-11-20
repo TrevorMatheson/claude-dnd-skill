@@ -185,10 +185,12 @@ class TestCastGeminiVoices(_CampaignCase):
     def test_gemini_voices_least_used_so_distinct_until_used_up(self):
         self.display("gemini")
         self.npcs(_npc("Old One", "af_bella", "Kore"), _npc("Old Two", "bf_lily", "Charon"))
+        # Not tts.DEFAULT_VOICE: it reads the narration when Kokoro is down (D19).
+        pool = GEMINI - {tts.DEFAULT_VOICE}
         seen = ["Kore", "Charon"]
-        for i in range(len(GEMINI) - 2):
+        for i in range(len(pool) - 2):
             seen.append(self.cast.npc_voices(self.name, f"Npc{i}", engine="gemini").get("gemini"))
-        self.assertEqual(sorted(seen), sorted(GEMINI),
+        self.assertEqual(sorted(seen), sorted(pool),
                          f"Gemini voices were not spread least-used first: {seen}")
         extra = self.cast.npc_voices(self.name, "Npc Extra", engine="gemini").get("gemini")
         self.assertIn(extra, GEMINI)

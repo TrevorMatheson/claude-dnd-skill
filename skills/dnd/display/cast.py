@@ -405,7 +405,9 @@ def _npc_gemini(campaign, name: str, current: str) -> str:
     if sec is None:
         return ""
     held = [_gemini_of(lines, s) for s in sections if s is not sec]
-    pool = sorted(v for v in tts.VALID_VOICES if is_gemini(v) and v != narrator)
+    # Not the Gemini voice that reads narration when Kokoro is down either.
+    pool = sorted(v for v in tts.VALID_VOICES
+                  if is_gemini(v) and v not in (narrator, getattr(tts, "DEFAULT_VOICE", "")))
     if not pool:
         return ""
     voice = min(pool, key=lambda v: (held.count(v), pool.index(v)))
