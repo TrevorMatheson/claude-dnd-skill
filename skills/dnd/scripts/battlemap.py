@@ -42,6 +42,10 @@ from utf8io import read_text, write_text as write_keep_eol  # noqa: E402
 BLOCKING = set("#T ")
 DIFFICULT = set("~")
 FT = 5
+# A new battle map is at most this big (spec D7): the whole map always shows
+# on the TV, and a square must stay readable from the couch. Older saves up to
+# new_map's 80×80 still load.
+MAX_W, MAX_H = 30, 20
 
 # (dx, dy) for the 8 neighbours
 _STEPS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
@@ -75,6 +79,13 @@ def new_map(w: int, h: int, cells: list | None = None, image: str | None = None)
         cells = ["." * w for _ in range(h)]
     return {"grid": {"w": w, "h": h, "ft": FT}, "cells": cells, "image": image,
             "round": 1, "tokens": {}}
+
+
+def check_size(w: int, h: int) -> None:
+    """Refuse a new map over MAX_W×MAX_H (raises MapError)."""
+    if w > MAX_W or h > MAX_H:
+        raise MapError(f"A battle map is at most {MAX_W} squares wide and {MAX_H} tall; "
+                       f"this layout is {w}×{h}. Split the fight into areas or simplify the drawing.")
 
 
 def parse_layout(text: str) -> tuple:
@@ -248,13 +259,17 @@ def check_move(m: dict, name: str, x: int, y: int, dash: bool = False) -> dict:
     out["cost"], out["path"] = cost, [list(p) for p in path]
     out["difficult_ft"] = sum(FT for p in path[1:] if cell(m, *p) in DIFFICULT)
     if cost > out["straight_ft"]:
-        free = find_path(m, start, goal, n, kind, ignore_walls=True)
-        if free is not None and free[0] < cost:
+        # Whichever obstacle, taken away, shortens the route more is the
+        # reason; creatures win a tie (ignoring walls also lets a route step
+        # round a creature through the wall, which says nothing about walls).
+        no_crit = find_path(m, start, goal, n, kind, ignore_creatures=True)
+        no_wall = find_path(m, start, goal, n, kind, ignore_walls=True)
+        c_cost = no_crit[0] if no_crit else cost
+        w_cost = no_wall[0] if no_wall else cost
+        if c_cost < cost and c_cost <= w_cost:
+            out["detour_by"] = "creatures"
+        elif w_cost < cost:
             out["detour_by"] = "walls"
-        else:
-            free = find_path(m, start, goal, n, kind, ignore_creatures=True)
-            if free is not None and free[0] < cost:
-                out["detour_by"] = "creatures"
     why = []
     if out["detour_by"] == "walls":
         why.append(f"walls block the direct route ({out['straight_ft']} ft straight)")
@@ -269,7 +284,8 @@ def check_move(m: dict, name: str, x: int, y: int, dash: bool = False) -> dict:
                            f"of movement left (speed {speed}{', dashing' if dash else ''}){tail}")
         return out
     out.update(ok=True, left=budget - cost,
-               message=f"{n} {start} → {goal}: {cost} ft, {budget - cost} ft left{tail}")
+               message=f"{n} ({start[0]},{start[1]}) → {where}: {cost} ft, "
+                       f"{budget - cost} ft left{tail}")
     return out
 
 

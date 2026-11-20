@@ -503,9 +503,11 @@ def _map_cmd(a) -> int:
             if a.layout:
                 from utf8io import read_text
                 cells, markers, legend = bm.parse_layout(read_text(pathlib.Path(a.layout)))
+                bm.check_size(max(len(r) for r in cells), len(cells))
                 m = bm.new_map(max(len(r) for r in cells), len(cells), cells, a.image)
             elif a.size:
                 w, h = (int(v) for v in a.size.lower().split("x"))
+                bm.check_size(w, h)
                 m = bm.new_map(w, h, image=a.image)
             else:
                 print("combat.py map init: give --layout FILE or --size WxH", file=sys.stderr)
@@ -530,6 +532,10 @@ def _map_cmd(a) -> int:
             bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size)
             bm.save(camp, m)
             print(f"{a.name} placed at ({a.x},{a.y}).")
+        elif a.cmd == "move" and a.check and a.force:
+            print("combat.py move: --check tests a normal move; forced movement (--force) has no check",
+                  file=sys.stderr)
+            return 2
         elif a.cmd == "move" and a.check:
             r = bm.check_move(m, a.name, a.x, a.y, dash=a.dash)
             if a.json:
