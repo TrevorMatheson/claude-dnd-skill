@@ -423,6 +423,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dash", action="store_true", help="Dash: double speed this turn")
     s.add_argument("--force", action="store_true",
                    help="forced movement (shove, Push) or a DM ruling: no speed or path check")
+    s.add_argument("--check", action="store_true",
+                   help="dry run: say whether the move works and why not; saves and pushes nothing")
+    s.add_argument("--json", action="store_true", help="with --check: print the result as JSON")
     _camp(s)
 
     s = sub.add_parser("turn", help="start a creature's turn: its movement is fresh")
@@ -527,6 +530,15 @@ def _map_cmd(a) -> int:
             bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size)
             bm.save(camp, m)
             print(f"{a.name} placed at ({a.x},{a.y}).")
+        elif a.cmd == "move" and a.check:
+            r = bm.check_move(m, a.name, a.x, a.y, dash=a.dash)
+            if a.json:
+                print(json.dumps(r, ensure_ascii=False))
+            elif r["ok"]:
+                print(f"OK: {r['message']}")
+            else:
+                print(f"NO: {r['message']}", file=sys.stderr)
+            return 0 if r["ok"] else 2
         elif a.cmd == "move":
             r = bm.move(m, a.name, a.x, a.y, dash=a.dash, force=a.force)
             bm.save(camp, m)

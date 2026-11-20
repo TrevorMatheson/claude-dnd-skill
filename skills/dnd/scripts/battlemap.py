@@ -131,40 +131,57 @@ def _occupied(m: dict, ignore: str) -> dict:
     return {(t["x"], t["y"]): n for n, t in m["tokens"].items() if n != ignore}
 
 
-def path_cost_ft(m: dict, start: tuple, goal: tuple, mover: str = "", kind: str = "") -> int | None:
-    """Cheapest movement cost from start to goal around walls, obstacles and
-    hostile creatures, or None if there is no way. Allies can be passed through
-    but not ended on; difficult terrain costs double; a diagonal step may not
-    cut the corner of a wall."""
-    if cell(m, *goal) in BLOCKING:
+def find_path(m: dict, start: tuple, goal: tuple, mover: str = "", kind: str = "",
+              ignore_walls: bool = False, ignore_creatures: bool = False):
+    """(cost_ft, path) for the cheapest route from start to goal around walls,
+    obstacles and hostile creatures, or None if there is no way. `path` is the
+    list of squares from start to goal, both included. Allies can be passed
+    through but not ended on; difficult terrain costs double; a diagonal step
+    may not cut the corner of a wall. `ignore_walls` / `ignore_creatures` drop
+    those obstacles (used to explain why a route is long)."""
+    start, goal = tuple(start), tuple(goal)
+    blocking = set(" ") if ignore_walls else BLOCKING
+    if cell(m, *goal) in blocking:
         return None
     occ = _occupied(m, mover)
     if goal in occ:
         return None
     best = {start: 0}
+    prev = {}
     heap = [(0, start)]
     while heap:
         cost, (x, y) = heapq.heappop(heap)
         if (x, y) == goal:
-            return cost
+            path = [goal]
+            while path[-1] != start:
+                path.append(prev[path[-1]])
+            return cost, path[::-1]
         if cost > best.get((x, y), 1 << 30):
             continue
         for dx, dy in _STEPS:
             nx, ny = x + dx, y + dy
             c = cell(m, nx, ny)
-            if c in BLOCKING:
+            if c in blocking:
                 continue
-            if dx and dy and (cell(m, x + dx, y) == "#" or cell(m, x, y + dy) == "#"):
+            if dx and dy and not ignore_walls and (cell(m, x + dx, y) == "#" or cell(m, x, y + dy) == "#"):
                 continue      # no squeezing between two wall squares
             other = occ.get((nx, ny))
-            if other is not None and kind and m["tokens"][other].get("kind") != kind:
+            if (other is not None and kind and not ignore_creatures
+                    and m["tokens"][other].get("kind") != kind):
                 continue      # can't move through a hostile creature's space
             step = FT * (2 if c in DIFFICULT else 1)
             nc = cost + step
             if nc < best.get((nx, ny), 1 << 30):
                 best[(nx, ny)] = nc
+                prev[(nx, ny)] = (x, y)
                 heapq.heappush(heap, (nc, (nx, ny)))
     return None
+
+
+def path_cost_ft(m: dict, start: tuple, goal: tuple, mover: str = "", kind: str = "") -> int | None:
+    """Cheapest movement cost from start to goal (see find_path), or None."""
+    r = find_path(m, start, goal, mover, kind)
+    return r[0] if r else None
 
 
 # ── tokens ───────────────────────────────────────────────────────────────────
@@ -191,29 +208,93 @@ def place(m: dict, name: str, x: int, y: int, kind: str = "npc", speed: int = 30
     return m["tokens"][name]
 
 
+def check_move(m: dict, name: str, x: int, y: int, dash: bool = False) -> dict:
+    """Dry run of a move: never changes the map. Returns
+    {"ok", "name", "from", "to", "cost", "budget", "left", "straight_ft", "path",
+     "reason", "occupant", "detour_by", "difficult_ft", "message"}.
+    reason is None or one of off_map, blocked, occupied, no_path, too_far;
+    detour_by ("walls" | "creatures" | None) says what makes the route longer
+    than the straight line; difficult_ft is the extra feet difficult terrain
+    costs on the route. The message is one line to tell the player."""
+    n, t = token(m, name)
+    start = (t["x"], t["y"])
+    goal = (int(x), int(y))
+    speed = t.get("speed", 30)
+    budget = max(speed * (2 if dash else 1) - t.get("moved", 0), 0)
+    out = {"ok": False, "name": n, "from": list(start), "to": list(goal), "cost": None,
+           "budget": budget, "left": budget, "straight_ft": distance_ft(start, goal),
+           "path": [], "reason": None, "occupant": None, "detour_by": None,
+           "difficult_ft": 0, "message": ""}
+    g = m["grid"]
+    where = f"({goal[0]},{goal[1]})"
+    if not (0 <= goal[0] < g["w"] and 0 <= goal[1] < g["h"]) or cell(m, *goal) == " ":
+        out.update(reason="off_map", message=f"{where} is off the map")
+        return out
+    if cell(m, *goal) in BLOCKING:
+        what = "a wall" if cell(m, *goal) == "#" else "an obstacle"
+        out.update(reason="blocked", message=f"{where} is {what} — {n} can't stand there")
+        return out
+    occ = _occupied(m, n)
+    if goal in occ:
+        out.update(reason="occupied", occupant=occ[goal],
+                   message=f"{where} is taken by {occ[goal]}")
+        return out
+    kind = t.get("kind", "")
+    found = find_path(m, start, goal, n, kind)
+    if found is None:
+        out.update(reason="no_path", message=f"{n} has no way to reach {where} — blocked or walled off")
+        return out
+    cost, path = found
+    out["cost"], out["path"] = cost, [list(p) for p in path]
+    out["difficult_ft"] = sum(FT for p in path[1:] if cell(m, *p) in DIFFICULT)
+    if cost > out["straight_ft"]:
+        free = find_path(m, start, goal, n, kind, ignore_walls=True)
+        if free is not None and free[0] < cost:
+            out["detour_by"] = "walls"
+        else:
+            free = find_path(m, start, goal, n, kind, ignore_creatures=True)
+            if free is not None and free[0] < cost:
+                out["detour_by"] = "creatures"
+    why = []
+    if out["detour_by"] == "walls":
+        why.append(f"walls block the direct route ({out['straight_ft']} ft straight)")
+    elif out["detour_by"] == "creatures":
+        why.append(f"hostile creatures block the direct route ({out['straight_ft']} ft straight)")
+    if out["difficult_ft"]:
+        why.append(f"difficult terrain adds {out['difficult_ft']} ft")
+    tail = f"; {'; '.join(why)}" if why else ""
+    if cost > budget:
+        out.update(reason="too_far",
+                   message=f"{n} needs {cost} ft to reach {where} but has {budget} ft "
+                           f"of movement left (speed {speed}{', dashing' if dash else ''}){tail}")
+        return out
+    out.update(ok=True, left=budget - cost,
+               message=f"{n} {start} → {goal}: {cost} ft, {budget - cost} ft left{tail}")
+    return out
+
+
 def move(m: dict, name: str, x: int, y: int, dash: bool = False, force: bool = False) -> dict:
-    """Move a token, spending movement. Returns {"name","from","to","cost","left"}.
+    """Move a token, spending movement. Returns {"name","from","to","cost","left","path"}.
     `dash` doubles the speed for this turn; `force` skips the checks (forced
     movement such as a shove or Push mastery, or a DM ruling)."""
     n, t = token(m, name)
     start = (t["x"], t["y"])
+    path = [start, (x, y)]
     if force:
         if cell(m, x, y) in BLOCKING:
             raise MapError(f"({x},{y}) is a wall, obstacle or off the map")
         cost = 0
     else:
-        cost = path_cost_ft(m, start, (x, y), mover=n, kind=t.get("kind", ""))
-        if cost is None:
-            raise MapError(f"{n} can't reach ({x},{y}) — blocked or occupied")
-        budget = t.get("speed", 30) * (2 if dash else 1) - t.get("moved", 0)
-        if cost > budget:
-            raise MapError(f"{n} needs {cost} ft to reach ({x},{y}) but has {max(budget, 0)} ft "
-                           f"of movement left (speed {t.get('speed', 30)}"
-                           f"{', dashing' if dash else ''})")
+        r = check_move(m, n, x, y, dash=dash)
+        if not r["ok"]:
+            raise MapError(r["message"])
+        cost = r["cost"]
+        path = [tuple(p) for p in r["path"]]
         t["moved"] = t.get("moved", 0) + cost
     t["x"], t["y"] = x, y
     left = t.get("speed", 30) * (2 if dash else 1) - t.get("moved", 0)
-    return {"name": n, "from": start, "to": (x, y), "cost": cost, "left": max(left, 0)}
+    return {"name": n, "from": start, "to": (x, y), "cost": cost, "left": max(left, 0),
+            "path": path}
 
 
 def set_hp(m: dict, name: str, cur: int, mx: int | None = None) -> dict:

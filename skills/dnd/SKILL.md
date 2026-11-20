@@ -183,11 +183,14 @@ $C map init --layout "$CAMP_DIR/maps/cellar.txt" --place -c $CAMP    # or --size
 $C place "Giant Rat" 11 1 -c $CAMP         # --pc for a PC, --speed 40, --size 2 (Large)
 $C turn Havoc -c $CAMP                     # start of a creature's turn: fresh movement
 $C move Havoc 7 4 -c $CAMP                 # checks walls, obstacles, difficult terrain, hostile squares and speed; --dash, --force (shove / Push)
+$C move Havoc 6 1 --check -c $CAMP         # dry run: OK, or the limit (feet left, wall in the way); saves and pushes nothing; --json
 $C hp "Giant Rat" 3/7 -c $CAMP             # monster HP ring (PCs use the party sidebar's HP)
 $C attack --atk 5 --ac 12 --dmg 1d6+3 --from Anony --target "Giant Rat" --range 80/320 -c $CAMP
 $C map show -c $CAMP                       # text view of the map and everyone's movement used
 $C end --clear-map -c $CAMP                # fight over: end combat and take the map off the TV
 ```
+
+**A player's move is checked before it is narrated.** When a player says where their character goes, run `move NAME X Y --check` first (add `--dash` if they dashed). If it fails, never narrate the move: tell that player the limit in one line from the result — e.g. "you have 30 ft left, and the wall blocks the direct route (it's 35 ft round by the door)" — and ask where they go instead. Only a move that passes the check is narrated and sent.
 
 A layout is a text drawing, one character per 5-ft square: `#` wall, `.` floor, `~` difficult terrain, `T` obstacle, `D` door, space = outside. Letters mark starting squares, bound by legend lines — **UPPERCASE = PC**, lowercase = monster: `H = Havoc`, `r = Giant Rat`. A background image goes in `<campaign-dir>/maps/`; draw the layout to match its grid.
 
