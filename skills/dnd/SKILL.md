@@ -195,12 +195,6 @@ A layout is a text drawing, one character per 5-ft square: `#` wall, `.` floor, 
 
 ---
 
-## D&D Beyond Maps (VTT)
-
-If the table plays on D&D Beyond Maps, the sibling `maps` skill (`/dm:maps`) puts scenes on the VTT by driving the Maps page in the browser. It sets the scene; the TV battle map above follows the fight. Mirror moves to Maps only once per round, as one batch (maps skill §6b), never token by token during narration. When the party reaches a new location or a fight starts and `<campaign-dir>/vtt.md` exists (meaning this campaign uses Maps), offer once in a short line to update the map; on a yes, invoke `/dm:maps`. Never block narration on it.
-
----
-
 ## Directory Layout
 
 **Code & assets** live in the skill directory. `${CLAUDE_SKILL_DIR}` is substituted
