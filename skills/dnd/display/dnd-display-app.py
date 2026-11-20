@@ -1316,6 +1316,11 @@ def _load_stats() -> None:
     try:
         with open(STATS_FILE, encoding="utf-8") as f:
             data = json.load(f)
+        # A map saved before the v2 cleaning is cleaned on load. At import
+        # _clean_map isn't defined yet; the pass after it covers that case.
+        cleaner = globals().get("_clean_map")
+        if cleaner and "map" in data:
+            data["map"] = cleaner(data["map"])
         with _stats_lock:
             _current_stats.update(data)
         # Initialise expected player count from persisted stats so solo-mode
@@ -2325,15 +2330,76 @@ def _clean_map(m):
                    "size": max(1, min(4, int(t.get("size", 1))))}
         except (KeyError, TypeError, ValueError):
             continue
-        if isinstance(t.get("hp"), (list, dict)):
-            tok["hp"] = t["hp"]
+        if t.get("hidden"):
+            continue          # D10: a hidden token never reaches a screen
+        hp = t.get("hp")
+        if tok["kind"] == "pc":
+            if isinstance(hp, (list, dict)):
+                tok["hp"] = hp
+        else:
+            # D8: a monster's numbers never reach a screen, only a rough state.
+            state = t.get("hp_state") if t.get("hp_state") in _HP_STATES else None
+            if state is None and hp is not None:
+                try:
+                    cur, mx = (hp[0], hp[1]) if isinstance(hp, list) else (hp.get("current"), hp.get("max"))
+                    state = _bm_hp_state(cur, mx)
+                except (TypeError, IndexError, KeyError, AttributeError):
+                    state = None
+            if state:
+                tok["hp_state"] = state
         if isinstance(t.get("conditions"), list):
             tok["conditions"] = [str(c)[:24] for c in t["conditions"][:6]]
+        if _map_asset_ok(t.get("portrait")):
+            tok["portrait"] = t["portrait"]
         tokens.append(tok)
     image = m.get("image")
     image = str(image) if isinstance(image, str) and re.fullmatch(r"[\w\-./ ]{1,120}", image) else None
     return {"grid": {"w": w, "h": h, "ft": 5}, "cells": cells, "image": image,
-            "round": int(m.get("round") or 1), "tokens": tokens}
+            "round": int(m.get("round") or 1), "fog": _clean_fog(m.get("fog"), w, h),
+            "tokens": tokens}
+
+
+_HP_STATES = ("healthy", "bloodied", "near_death")
+
+
+def _bm_hp_state(cur, mx):
+    from battlemap import hp_state
+    return hp_state(cur, mx)
+
+
+def _map_asset_ok(path) -> bool:
+    """A picture path inside the campaign's maps/ folder (served by /map-image)."""
+    return (isinstance(path, str) and ".." not in path
+            and re.fullmatch(r"[\w\-./ ]{1,120}", path) is not None
+            and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")))
+
+
+def _clean_fog(f, w, h) -> dict:
+    """Fog squares as [x, y] int pairs on the grid; at most w*h per list."""
+    out = {"trail": [], "show": [], "hide": []}
+    if not isinstance(f, dict):
+        return out
+    for k in out:
+        seen = set()
+        items = f.get(k) if isinstance(f.get(k), list) else []
+        for p in items[: w * h * 2]:
+            if not (isinstance(p, (list, tuple)) and len(p) == 2):
+                continue
+            x, y = p
+            if type(x) is not int or type(y) is not int or not (0 <= x < w and 0 <= y < h):
+                continue
+            if (x, y) not in seen:
+                seen.add((x, y))
+                out[k].append([x, y])
+    return out
+
+
+# stats.json is loaded at import, before _clean_map exists: a map saved
+# before the v2 cleaning (exact monster HP, hidden tokens) is cleaned here,
+# before anything can replay it.
+with _stats_lock:
+    if "map" in _current_stats:
+        _current_stats["map"] = _clean_map(_current_stats["map"])
 
 
 @app.route("/map-image/<path:name>")

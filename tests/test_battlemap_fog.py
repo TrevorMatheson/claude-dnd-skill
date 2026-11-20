@@ -436,6 +436,189 @@ class TestCli(unittest.TestCase):
         self.assertEqual(len(p.get("fog", {}).get("show", [])), 6)
 
 
+# ── server cleaning of the v2 map (S5: AC3, AC9, AC12 server side) ───────────
+
+def _raw_map(**extra_tok):
+    """A raw /stats map as `push_stats --json` could send it: exact monster
+    HP, a hidden token, fog and a portrait."""
+    goblin = {"name": "Goblin", "x": 5, "y": 1, "kind": "npc", "hp": [3, 7],
+              "portrait": "maps/tokens/goblin.png"}
+    goblin.update(extra_tok)
+    return {
+        "grid": {"w": 14, "h": 6, "ft": 5},
+        "cells": CELLAR.splitlines()[:6],
+        "round": 2,
+        "tokens": [
+            {"name": "Havoc", "x": 1, "y": 1, "kind": "pc", "hp": [10, 12]},
+            goblin,
+            {"name": "Lurker", "x": 8, "y": 3, "kind": "npc", "hidden": True, "hp": [9, 9]},
+        ],
+        "fog": {"trail": [[1, 1], [2, 1]], "show": [[6, 2]], "hide": [[12, 4]]},
+    }
+
+
+class TestServerCleanMap(unittest.TestCase):
+    """`_clean_map` on /stats and in `_load_stats` (plan S5)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_battlemap import _import_app
+        cls.app = _import_app()
+        cls.app._token_ok = lambda: True
+        cls.client = cls.app.app.test_client()
+
+    def setUp(self):
+        self.app._current_stats.pop("map", None)
+        self.sent = []
+        self._p = mock.patch.object(self.app, "_broadcast", side_effect=self.sent.append)
+        self._p.start()
+
+    def tearDown(self):
+        self._p.stop()
+        self.app._current_stats.pop("map", None)
+
+    def _push(self, m):
+        self.sent.clear()
+        r = self.client.post("/stats", json={"map": m})
+        self.assertLess(r.status_code, 300, r.data)
+        stored = self.app._current_stats.get("map")
+        self.assertIsInstance(stored, dict, "map was not stored")
+        sent = [p["stats"]["map"] for p in self.sent
+                if isinstance(p, dict) and isinstance(p.get("stats"), dict) and "map" in p["stats"]]
+        self.assertTrue(sent, "no stats broadcast carried the map")
+        return stored, sent[-1]
+
+    def _both(self, m):
+        stored, sent = self._push(m)
+        return [("stored", stored), ("broadcast", sent)]
+
+    def test_hidden_token_dropped_stored_and_broadcast(self):
+        for where, m in self._both(_raw_map()):
+            with self.subTest(where=where):
+                self.assertIsNone(_tok(m, "Lurker"), f"hidden token in the {where} map (AC9)")
+                self.assertNotIn("Lurker", json.dumps(m))
+
+    def test_monster_hp_list_becomes_hp_state(self):
+        for where, m in self._both(_raw_map()):
+            with self.subTest(where=where):
+                gob = _tok(m, "Goblin")
+                self.assertIsNotNone(gob)
+                self.assertNotIn("hp", gob, f"exact monster HP in the {where} map (AC3)")
+                self.assertEqual(gob.get("hp_state"), "bloodied")
+
+    def test_monster_near_death_from_hp_list(self):
+        stored, _ = self._push(_raw_map(hp=[1, 7]))
+        gob = _tok(stored, "Goblin")
+        self.assertNotIn("hp", gob)
+        self.assertEqual(gob.get("hp_state"), "near_death")
+
+    def test_monster_hp_dict_never_reaches_screens(self):
+        stored, sent = self._push(_raw_map(hp={"cur": 3, "max": 7}))
+        for m in (stored, sent):
+            self.assertNotIn("hp", _tok(m, "Goblin"))
+
+    def test_pc_hp_list_kept(self):
+        for where, m in self._both(_raw_map()):
+            with self.subTest(where=where):
+                self.assertEqual(_tok(m, "Havoc").get("hp"), [10, 12])
+
+    def test_fog_survives(self):
+        for where, m in self._both(_raw_map()):
+            with self.subTest(where=where):
+                fog = m.get("fog")
+                self.assertIsInstance(fog, dict, f"fog dropped from the {where} map")
+                self.assertEqual(_sqs(fog.get("trail", [])), {(1, 1), (2, 1)})
+                self.assertEqual(_sqs(fog.get("show", [])), {(6, 2)})
+                self.assertEqual(_sqs(fog.get("hide", [])), {(12, 4)})
+
+    def test_fog_keeps_ints_only(self):
+        raw = _raw_map()
+        raw["fog"] = {"trail": [[1, 1], ["a", 2], None, [3], "x", [2, 1], [{"k": 1}, 4]],
+                      "show": [[6, 2], ["<b>", 0]], "hide": [[None, None], [12, 4]],
+                      "junk": [[0, 0]]}
+        stored, _ = self._push(raw)
+        fog = stored.get("fog")
+        self.assertIsInstance(fog, dict, "fog dropped")
+        self.assertEqual(_sqs(fog.get("trail", [])), {(1, 1), (2, 1)})
+        self.assertEqual(_sqs(fog.get("show", [])), {(6, 2)})
+        self.assertEqual(_sqs(fog.get("hide", [])), {(12, 4)})
+        self.assertNotIn("junk", fog)
+        for key in ("trail", "show", "hide"):
+            for sq in fog.get(key, []):
+                self.assertTrue(len(sq) == 2 and all(type(v) is int for v in sq), (key, sq))
+
+    def test_portrait_survives(self):
+        for where, m in self._both(_raw_map()):
+            with self.subTest(where=where):
+                self.assertEqual(_tok(m, "Goblin").get("portrait"), "maps/tokens/goblin.png")
+
+    def test_portrait_with_dotdot_dropped(self):
+        for bad in ("maps/../battlemap.png", "../../secret.png", "maps/tokens/../../x.png"):
+            with self.subTest(portrait=bad):
+                stored, sent = self._push(_raw_map(portrait=bad))
+                gob = _tok(stored, "Goblin")
+                self.assertIsNotNone(gob, "the token itself should stay")
+                self.assertNotIn("portrait", gob)
+                self.assertNotIn("portrait", _tok(sent, "Goblin"))
+
+    def test_portrait_not_an_image_dropped(self):
+        for bad in ("maps/battlemap.json", "maps/tokens/x.txt", "<img src=x onerror=1>.png",
+                    "javascript:alert(1)", 42, ["maps/a.png"]):
+            with self.subTest(portrait=bad):
+                stored, _ = self._push(_raw_map(portrait=bad))
+                self.assertNotIn("portrait", _tok(stored, "Goblin"))
+
+    def test_valid_hp_state_kept(self):
+        for state in ("healthy", "bloodied", "near_death"):
+            with self.subTest(hp_state=state):
+                raw = _raw_map()
+                gob = _tok(raw, "Goblin")
+                del gob["hp"]
+                gob["hp_state"] = state
+                stored, _ = self._push(raw)
+                self.assertEqual(_tok(stored, "Goblin").get("hp_state"), state)
+
+    def test_bad_hp_state_dropped(self):
+        for state in ("dead", "3/7", "", "<script>", 5, None, ["bloodied"]):
+            with self.subTest(hp_state=state):
+                raw = _raw_map()
+                gob = _tok(raw, "Goblin")
+                del gob["hp"]
+                gob["hp_state"] = state
+                stored, _ = self._push(raw)
+                self.assertNotIn("hp_state", _tok(stored, "Goblin"))
+
+    def test_map_null_still_clears(self):
+        self._push(_raw_map())
+        self.client.post("/stats", json={"map": None})
+        self.assertIsNone(self.app._current_stats.get("map"))
+
+    def test_load_stats_cleans_old_map(self):
+        import tempfile
+        old = {"map": {"grid": {"w": 14, "h": 6, "ft": 5}, "cells": CELLAR.splitlines()[:6],
+                       "round": 1, "image": None,
+                       "tokens": [{"name": "Havoc", "x": 1, "y": 1, "kind": "pc", "hp": [10, 12]},
+                                  {"name": "Giant Rat", "x": 11, "y": 1, "kind": "npc",
+                                   "size": 1, "hp": [3, 7]},
+                                  {"name": "Lurker", "x": 8, "y": 3, "kind": "npc",
+                                   "hidden": True, "hp": [9, 9]}]}}
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        path = pathlib.Path(d) / "stats.json"
+        path.write_text(json.dumps(old), encoding="utf-8")
+        new = str(path) if isinstance(self.app.STATS_FILE, str) else type(self.app.STATS_FILE)(path)
+        with mock.patch.object(self.app, "STATS_FILE", new):
+            self.app._load_stats()
+        m = self.app._current_stats.get("map")
+        self.assertIsInstance(m, dict, "_load_stats did not load the map")
+        rat = _tok(m, "Giant Rat")
+        self.assertIsNotNone(rat)
+        self.assertNotIn("hp", rat, "exact monster HP replayed from stats.json (AC3)")
+        self.assertEqual(rat.get("hp_state"), "bloodied")
+        self.assertIsNone(_tok(m, "Lurker"), "hidden token replayed from stats.json (AC9)")
+        self.assertEqual(_tok(m, "Havoc").get("hp"), [10, 12])
+
+
 # ── SKILL.md documents it ────────────────────────────────────────────────────
 
 class TestSkillDoc(unittest.TestCase):

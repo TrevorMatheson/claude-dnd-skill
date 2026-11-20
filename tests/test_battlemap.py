@@ -220,6 +220,7 @@ class TestServerAndTurn(unittest.TestCase):
         rat = [t for t in self.app._current_stats["map"]["tokens"] if t["name"] == "Giant Rat"][0]
         self.assertEqual((rat["x"], rat["y"]), (8, 1))
         self.assertNotIn("hp", rat)            # AC3: no exact monster HP on screens
+        self.assertEqual(rat.get("hp_state"), "bloodied")
         self.assertEqual(bm.load(self.camp)["tokens"]["Giant Rat"]["x"], 8)
 
     def test_bad_move_sends_nothing(self):
