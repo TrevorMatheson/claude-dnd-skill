@@ -71,6 +71,20 @@ def is_gemini(v) -> bool:
     return isinstance(v, str) and v in tts.VALID_VOICES and v not in tts.KOKORO_VOICES
 
 
+def same_voice(a, b) -> bool:
+    """"a+b" and "b+a" are one voice: same parts, same 50/50 mix."""
+    if not a or not b:
+        return False
+    pa, pb = tts.blend_parts(a), tts.blend_parts(b)
+    if pa and pb:
+        return frozenset(pa) == frozenset(pb)
+    return a == b
+
+
+def parts_of(v) -> tuple:
+    return tts.blend_parts(v) or ((v,) if v else ())
+
+
 def describe(v: str) -> str:
     """'British female' for bf_emma."""
     accent = {"b": "British", "a": "American"}.get(v[:1], "Other")
@@ -403,7 +417,7 @@ def _must_move(campaign, sections: list, sec: dict) -> bool:
     reserved = _reserved(campaign)
     if v in reserved or any(p in reserved for p in (tts.blend_parts(v) or ())):
         return True
-    if any(s is not sec and s["voice"] == v for s in sections):
+    if any(s is not sec and same_voice(s["voice"], v) for s in sections):
         held = set(_npc_held(sections))
         return any(f not in held and f not in reserved for f in kokoro_voices())
     return False
@@ -419,7 +433,7 @@ def _reassign_npcs_holding(campaign, voice: str) -> list:
         changed = False
         while True:
             sections = _npc_sections(lines)
-            hit = next((s for s in sections if s["voice"] == voice), None)
+            hit = next((s for s in sections if voice in parts_of(s["voice"])), None)
             if hit is None:
                 break
             new = _pick(campaign, [s for s in sections if s is not hit], avoid=(voice,))
@@ -434,7 +448,10 @@ def _reassign_npcs_holding(campaign, voice: str) -> list:
 def _set_npc(campaign, name: str, voice: str) -> None:
     if not is_kokoro(voice):
         raise ValueError(f"{voice!r} is not a Kokoro voice (see: cast.py voices --free)")
-    parts = set(tts.blend_parts(voice) or (voice,))
+    bp = tts.blend_parts(voice)
+    if bp and bp[0][:2] != bp[1][:2]:
+        raise ValueError(f"{voice}: a blend mixes two voices of one group (af, am, bf or bm)")
+    parts = set(bp or (voice,))
     if parts & {narrator_voice(campaign), heard_narrator(campaign)}:
         raise ValueError(f"{voice} is or contains the narrator's voice")
     if parts & pc_voices(campaign):
@@ -445,7 +462,7 @@ def _set_npc(campaign, name: str, voice: str) -> None:
             raise ValueError("npcs.md is not readable as UTF-8")
         sections = _npc_sections(lines)
         sec = _find(sections, name)
-        holder = next((s for s in sections if s["voice"] == voice and s is not sec), None)
+        holder = next((s for s in sections if same_voice(s["voice"], voice) and s is not sec), None)
         if holder is not None:
             raise ValueError(f"{voice} already belongs to {holder['name']}")
         if sec is None:
@@ -470,8 +487,8 @@ def _pc_path(campaign, name: str) -> Optional[Path]:
 
 
 def _set_pc(campaign, name: str, voice: str) -> None:
-    if not is_kokoro(voice):
-        raise ValueError(f"{voice!r} is not a Kokoro voice")
+    if voice not in tts.KOKORO_VOICES:
+        raise ValueError(f"{voice!r} is not a Kokoro voice (player characters get a single voice)")
     if voice == narrator_voice(campaign):
         raise ValueError(f"{voice} is the narrator's voice")
     path = _pc_path(campaign, name)
@@ -502,8 +519,8 @@ def _set_pc(campaign, name: str, voice: str) -> None:
 
 
 def _set_narrator(campaign, voice: str) -> None:
-    if not tts.valid_voice(voice):
-        raise ValueError(f"{voice!r} is not a voice")
+    if not tts.valid_voice(voice) or tts.blend_parts(voice):
+        raise ValueError(f"{voice!r} is not a narrator voice")
     folder = _camp(campaign)
     with _lock:
         cfg = display_config.load(folder)
@@ -555,7 +572,8 @@ def cast_list(campaign) -> dict:
 def _cli_voices(args) -> int:
     voices = free_voices(args.campaign) if args.free else kokoro_voices()
     if not voices:
-        print("No free voices left: new NPCs reuse the least-used NPC voice.")
+        print("No free voices left: a new NPC gets a blend of two voices when the Kokoro "
+              "helper supports it, else the least-used NPC voice.")
         return 0
     groups: dict = {}
     for v in voices:
