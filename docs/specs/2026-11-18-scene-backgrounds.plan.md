@@ -424,7 +424,7 @@ All foundation steps this needs (`/tv`, the background layer, `/layout`, `displa
 
 ## Needs a spec decision
 
-All three are buildable either way. Each is one setting or constant in the plan. The plan builds the default shown; the user can change any of them (sent to the orchestrating session 2026-11-20; items 1 and 3 matter only if the trial answer is yes).
+All three are buildable either way. Each is one setting or constant in the plan. The plan builds the default shown; the user can change any of them (raised with the user alongside the AC1 trial decision; items 1 and 3 matter only if the trial answer is yes).
 
 1. **Arriving somewhere whose picture is being made.**
    - D5 says "the current background stays until the image is ready". Built literally, the previous place's painting stays under the new mood for the 10–30 s generation takes.
