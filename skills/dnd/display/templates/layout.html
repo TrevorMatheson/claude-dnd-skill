@@ -48,7 +48,49 @@
     <p class="lp-note">Auto switches to combat when a turn order is set and back when it's cleared. Combat or Story forces it until the next fight starts or ends.</p>
     <div id="lp-override" class="lp-seg" role="group" aria-labelledby="lp-override-h"></div>
   </section>
+
+  <section id="lp-voice" class="lp-section" aria-labelledby="lp-voice-h">
+    <h2 id="lp-voice-h">Voices</h2>
+    <p id="lp-voice-note" class="lp-voice-note" role="status" aria-live="polite" hidden></p>
+
+    <div class="lp-row">
+      <label for="lp-narrator">Narrator</label>
+      <div class="lp-ctl">
+        <select id="lp-narrator"></select>
+        <button type="button" id="lp-narrator-preview">Preview</button>
+      </div>
+    </div>
+
+    <div class="lp-row">
+      <span id="lp-engine-h">NPC voices</span>
+      <div class="lp-ctl">
+        <div id="lp-engine" class="lp-seg" role="group" aria-labelledby="lp-engine-h"></div>
+      </div>
+    </div>
+    <p class="lp-note">Kokoro runs on this computer and costs nothing. Gemini needs a key: the free tier runs out early in a night, so NPCs fall back to their own Kokoro voice.</p>
+
+    <div class="lp-row">
+      <label for="lp-volume">Volume</label>
+      <div class="lp-ctl"><input id="lp-volume" type="range" min="0" max="1" step="0.05"><output id="lp-volume-out"></output></div>
+    </div>
+    <div class="lp-row">
+      <label for="lp-speed">Speech speed</label>
+      <div class="lp-ctl"><input id="lp-speed" type="range" min="0.5" max="2" step="0.05"><output id="lp-speed-out"></output></div>
+    </div>
+    <div class="lp-row">
+      <label for="lp-read-actions">Read player actions aloud</label>
+      <div class="lp-ctl"><input id="lp-read-actions" type="checkbox"> <span class="lp-note">Typed actions are read in the character's voice before the DM answers. Talk isn't read back.</span></div>
+    </div>
+
+    <h3>Cast</h3>
+    <p class="lp-note">Who speaks in which voice. No NPC ever shares the narrator's or a player character's voice.</p>
+    <table id="lp-cast" class="lp-cast">
+      <thead><tr><th scope="col">Character</th><th scope="col">Voice</th><th scope="col"><span class="sr">Preview</span></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
 </main>
 <script src="/static/layout/layout.js"></script>
+<script src="/static/layout/voices.js"></script>
 </body>
 </html>

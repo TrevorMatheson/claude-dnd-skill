@@ -45,7 +45,26 @@ body { font-family: var(--f-body); font-size: 16px; line-height: 1.5; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 [hidden] { display: none !important; }
 
+/* Voices */
+.lp-row { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; }
+.lp-ctl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.lp-ctl select { padding: 6px 8px; min-width: 220px; }
+.lp-ctl button { padding: 6px 14px; }
+.lp-ctl input[type="range"] { width: 240px; accent-color: var(--accent); }
+.lp-ctl input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); }
+.lp-ctl output { min-width: 4em; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.lp-voice-note { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.lp-cast { width: 100%; border-collapse: collapse; }
+.lp-cast th, .lp-cast td { padding: 8px 6px; border-top: 1px solid var(--panel-line); text-align: left; vertical-align: middle; }
+.lp-cast thead th { border-top: 0; color: var(--ink-dim); font-weight: 400; font-size: 14px; }
+.lp-cast tbody th { font-weight: 400; display: grid; }
+.lp-cast tbody th small { color: var(--ink-dim); font-size: 13px; }
+.lp-cast select { padding: 6px 8px; width: 100%; max-width: 280px; }
+.lp-cast button { padding: 6px 12px; }
+
 @media (max-width: 640px) {
   .lp-panels { grid-template-columns: 1fr; }
   .lp-tv { display: none; }
+  .lp-row { grid-template-columns: 1fr; gap: 4px; }
+  .lp-ctl input[type="range"] { width: 100%; }
 }

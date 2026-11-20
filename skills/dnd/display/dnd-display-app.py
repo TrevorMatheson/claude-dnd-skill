@@ -1523,7 +1523,14 @@ def display_config_post():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(error="Send the settings as a JSON object."), 400
-    clean = display_config.validate(data)
+    # A partial post changes only what it names: {"voice": {"speed": 1.2}}
+    # keeps the layout and every other voice setting (the narrator included).
+    merged = _display_config()
+    if isinstance(data.get("layout"), dict):
+        merged["layout"] = data["layout"]
+    if isinstance(data.get("voice"), dict):
+        merged["voice"] = {**(merged.get("voice") or {}), **data["voice"]}
+    clean = display_config.validate(merged)
     folder = _campaign_dir()
     if folder:
         clean = display_config.save(folder, clean)
@@ -2791,9 +2798,16 @@ def cast_get():
     if _cast is None or not name:
         return jsonify(narrator=_read_narrator_voice(), pcs=[], npcs=[], voices=[])
     try:
-        for pc in _cast.cast_list(name)["pcs"]:
+        first = _cast.cast_list(name)
+        for pc in first["pcs"]:
             if not pc["voice"]:
                 _cast.pc_voice(name, pc["name"])       # D22: every PC has a voice
+        # Show the voice each NPC will really be read in: an NPC with none, or
+        # an old Gemini Voice: line, is settled now rather than when it speaks.
+        engine = _display_config().get("voice", {}).get("npc_engine", "kokoro")
+        for npc in first["npcs"]:
+            if not _tts.is_kokoro(npc["voice"]) or (engine == "gemini" and not npc.get("gemini")):
+                _cast.npc_voices(name, npc["name"], engine=engine)
         data = _cast.cast_list(name)
     except (OSError, ValueError) as exc:
         return jsonify(error=str(exc)), 500
