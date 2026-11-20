@@ -214,6 +214,16 @@ body { font-family: var(--f-body); overflow: hidden; }
 .rewind-btn:hover, .rewind-btn:focus-visible { opacity: 1; border-color: var(--panel-line); outline: none; }
 .rewind-btn.armed { opacity: 1; color: var(--accent); border-color: var(--accent); }
 
+/* ▶ on narration and NPC blocks plays the block again (D25); ■ stops it. */
+.replay-btn {
+  margin-left: .5rem; padding: 0 .5rem; vertical-align: .1em;
+  font: inherit; font-size: 1.125rem; font-style: normal; line-height: 1.6; color: var(--ink-dim);
+  background: none; border: 1px solid transparent; border-radius: .25rem; cursor: pointer; opacity: .4;
+}
+.replay-btn:hover, .replay-btn:focus-visible { opacity: 1; border-color: var(--panel-line); outline: none; }
+.replay-btn.playing { opacity: 1; color: var(--accent); border-color: var(--accent); }
+.stage[data-voice="off"] .replay-btn { display: none; }
+
 /* The roll card: a pending roll request, always after the newest block. */
 .roll-card {
   display: flex; align-items: center; gap: 1.375rem; padding: 1.125rem .5rem;

@@ -39,9 +39,16 @@
       audio.unlock().then(() => { if (audio.isUnlocked()) tapBtn.hidden = true; });
     },
     canVoice: () => voiceOn,
+    // ▶ / ■ on the replayed block (D25).
+    onReplayChange: () => { if (feed) feed.render(); },
   });
+  const showVoiceState = () => { stage.dataset.voice = voiceOn ? 'on' : 'off'; };
+  showVoiceState();
 
-  feed = TV.feed.mount(document.getElementById('tv-feed'), TV.feed.makeFeedModel(), { token, voice });
+  feed = TV.feed.mount(document.getElementById('tv-feed'), TV.feed.makeFeedModel(), {
+    token, voice,
+    unlockAudio: () => audio.unlock().then(() => { if (audio.isUnlocked()) tapBtn.hidden = true; }),
+  });
   const devices = TV.devices.mount(document.getElementById('tv-devices'), TV.devices.makeDeviceModel(), { token });
   const sceneLabel = document.getElementById('scene-indicator');
 
@@ -78,6 +85,7 @@
     // The server's voice state ({on, reason}); a block's own `voice` is a string.
     if (p.voice && typeof p.voice === 'object') {
       voiceOn = !!p.voice.on;
+      showVoiceState();
       // Voice off mid-burst: stop talking but show every block, as text.
       if (!voiceOn) { feed.settle(); tapBtn.hidden = true; }
     }

@@ -85,6 +85,14 @@ theme, and a cast where every character keeps their own voice.
   dice roller, DM Help button and sound-effects toggle are not: players roll
   and ask from their phones. *Why:* without the cards, a new phone can't join
   while the TV runs `/tv`.
+- **D25 — Any narration or NPC block can be heard again, from the TV.**
+  A faint ▶ on each narration and NPC block on `/tv` (history included)
+  replays that block's audio in its own voice; the text stays as it is.
+  Tapping it again stops it. Live narration wins: a replay stops when the
+  next block's voice is due, and a replay can't start while live voice is
+  playing. TV only, not the phones. *Why:* the old page's per-block play
+  button; a line missed across the room should be easy to hear again.
+  Added 2026-11-19.
 - **D14 — The background is its own layer.** It shows the current scene
   background unchanged, as a placeholder. The Scene backgrounds spec
   (animations, generated images) replaces that layer later without touching
@@ -154,6 +162,7 @@ theme, and a cast where every character keeps their own voice.
 - **AC16** — No two NPCs share a voice until the pool is used up; after that, blended voices are saved per NPC and sound distinct. *Check:* unit test + a listening test by the user.
 - **AC17** — With Gemini on and the quota used up, each NPC is read in its own Kokoro voice. *Check:* unit test (simulated 429).
 - **AC18** — Importing or creating a player character stores a voice in its file that no NPC is ever given; "Read player actions aloud" is off by default; when on, typed actions (not Talk) are read in that voice before the DM's response. *Check:* unit test + playtest.
+- **AC20** — On `/tv`, the ▶ on a narration or NPC block replays its audio in that block's voice without retyping; a second tap stops it; live narration stops a replay and is never talked over by one. *Check:* unit test + browser.
 - **AC19** — One real game night runs on `/tv` with no fallback to the old page; only then does `/` switch. *Check:* playtest at a real table (user).
 
 ## At the table

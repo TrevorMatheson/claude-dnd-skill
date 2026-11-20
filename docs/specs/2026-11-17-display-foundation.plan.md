@@ -309,6 +309,19 @@ status: approved      # proposed → approved
   - Node tests pass, with the same harness approach as `test_tts_autoqueue.py`: blocks of a burst play one after another; a gate that fails or times out types without voice; narration that arrives while a read action is playing waits for it.
   - Browser with Kokoro: narration types in step with the voice, and "Tap for audio" appears and unlocks.
 
+### S9a: Replay a block (added 2026-11-19)
+- **Covers:** AC20, D25
+- **Files:**
+  - Changed: `static/tv/voice.js`, `feed.js`, `tv.js`, `tv.css`; tests in `tests/test_tv_voice.py`
+- **Change:**
+  - `voice.replay(block)` reads a whole narration or NPC block again: narration sentence by sentence with the same `/tts` bodies (`local_only` kept), an NPC line in one request with its voice and fallback. Audio only; `type` is not called.
+  - It stops any earlier replay. It does nothing while live voice is playing or queued. A block enqueued while a replay plays stops the replay first (`stop()`), so live narration starts on time.
+  - `voice.stopReplay()` and `voice.replaying()` (the block, or null) let the feed show ▶ / ■ and stop on a second tap.
+  - `feed.js` adds a faint ▶ button to each narration and NPC block that is done typing (history included), styled like ↶. It is hidden while voice is off.
+- **Done when:**
+  - Node tests pass: a replay fetches the block's sentences in order with the same bodies and never calls `type`; a second replay of the same block stops it; a live block arriving mid-replay stops it and plays on time; a replay asked for while live voice plays does nothing; an unspoken kind (dice, player) can't be replayed.
+  - Browser: ▶ replays a narration block and an NPC block in their voices, ■ stops it, and new narration cuts a replay off.
+
 ### S10: Laptop page, layout section
 - **Covers:** AC4, AC6, AC7 (manual override), D6
 - **Files:**

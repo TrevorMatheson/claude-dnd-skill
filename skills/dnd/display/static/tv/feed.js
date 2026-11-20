@@ -273,6 +273,27 @@
       return b;
     }
 
+    // ▶ plays the block again; ■ (while it plays) stops it.
+    function replayButton(b, playing) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'replay-btn' + (playing ? ' playing' : '');
+      btn.textContent = playing ? '■' : '▶';
+      const label = playing ? 'Stop' : 'Play this again';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (voice.replaying && voice.replaying() === b) { voice.stopReplay(); return; }
+        // The tap itself can unlock browser audio (a TV reloaded before
+        // anyone tapped), so unlock first, then replay.
+        Promise.resolve(opts.unlockAudio ? opts.unlockAudio() : null)
+          .catch(() => {})
+          .then(() => voice.replay(b));
+      });
+      return btn;
+    }
+
     function render(force) {
       const v = model.view();
       track(v.blocks);
@@ -298,6 +319,19 @@
         frag.appendChild(div);
       });
       if (lastTurn) lastTurn.appendChild(rewindButton(lastTurnSeq));
+      // D25: a ▶ on every narration and NPC block that has finished typing.
+      if (voice && voice.replay) {
+        const playing = voice.replaying ? voice.replaying() : null;
+        for (const node of frag.children) {
+          const key = node.dataset && node.dataset.key;
+          if (!key || node.classList.contains('typing')) continue;
+          if (!node.classList.contains('narr') && !node.classList.contains('npc')) continue;
+          const b = shown.find((x) => { const st = stateOf(x); return st && String(st.key) === key; });
+          // At the end of the last line, not on a line of its own.
+          const last = node.lastElementChild;
+          if (b) (last && last.tagName === 'P' ? last : node).appendChild(replayButton(b, b === playing));
+        }
+      }
       if (v.rollCard) {
         const c = v.rollCard;
         const card = document.createElement('div');

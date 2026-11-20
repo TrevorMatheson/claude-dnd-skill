@@ -136,10 +136,63 @@
       w.forEach((f) => f());
     }
 
+    // ── Replay (D25): hear a narration or NPC block again, audio only. ──
+    // Live voice wins: a replay never starts over it, and live audio due
+    // while a replay plays stops the replay first.
+    let rep = null;   // {block, alive}
+    const notify = () => { if (d.onReplayChange) d.onReplayChange(rep ? rep.block : null); };
+
+    function stopReplay() {
+      if (!rep) return;
+      rep.alive = false;
+      rep = null;
+      if (d.stop) d.stop();
+      notify();
+    }
+
+    function replay(b) {
+      if (!b || typeof b !== 'object') return false;
+      if (rep && rep.block === b) { stopReplay(); return false; }   // second tap stops it
+      if (UNSPOKEN.some((k) => b[k])) return false;
+      if (running || queue.length || !d.isUnlocked()) return false;
+      const text = String(b.text || '');
+      const steps = (b.npc
+        ? [step(b, text, 'npc', b.voice, b.voice_fallback, wait.npc, true)]
+        : sentences(text).map((s) => step(b, s, 'narration', b.voice || settings.narrator, null, wait.narration, true))
+      ).filter((s) => s.gate);
+      if (!steps.length) return false;
+      stopReplay();
+      const r = { block: b, alive: true };
+      rep = r;
+      notify();
+      (async () => {
+        for (let i = 0; i < steps.length && r.alive; i++) {
+          fetchStep(steps[i]);
+          if (steps[i + 1]) fetchStep(steps[i + 1]);
+          const clip = await steps[i].p;
+          if (!r.alive) break;
+          if (clip) {
+            try { await d.play(clip, { gain: settings.volume }); } catch (_) { /* stopped */ }
+          }
+        }
+        if (rep === r) { rep = null; notify(); }
+      })();
+      return true;
+    }
+
     return {
-      enqueue(block) { if (block) { queue.push(plan(block)); pump(); } },
+      enqueue(block) {
+        if (!block) return;
+        if (!block.history) stopReplay();
+        queue.push(plan(block));
+        pump();
+      },
+      replay,
+      stopReplay,
+      replaying() { return rep ? rep.block : null; },
       // D22: player actions read aloud join the same timeline, audio only.
       readActions(items) {
+        stopReplay();
         for (const it of Array.isArray(items) ? items : []) {
           if (it && it.text) queue.push([step(null, String(it.text), 'action', it.voice, null, wait.npc, true)]);
         }
@@ -152,7 +205,7 @@
         if (typeof s.volume === 'number' && isFinite(s.volume)) settings.volume = s.volume;
       },
       // Rewind and clear: drop everything waiting and stop what is playing.
-      reset() { gen++; queue = []; if (d.stop) d.stop(); },
+      reset() { stopReplay(); gen++; queue = []; if (d.stop) d.stop(); },
       idle() {
         return !running && !queue.length ? Promise.resolve() : new Promise((r) => waiters.push(r));
       },

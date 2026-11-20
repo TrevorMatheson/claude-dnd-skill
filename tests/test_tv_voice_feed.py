@@ -130,9 +130,13 @@ voice.reset = () => { ev.reset++; return realReset(); };
 const el = El('div');
 feed = mount(el, makeFeedModel(), { voice });
 
-// What the TV shows: [seq, typing?, text] per block.
+// What the TV shows: [seq, typing?, text] per block. Buttons (↶, the D25 ▶)
+// are controls, not story text.
+const storyText = (c) => (c._text != null ? c._text : c._html.replace(/<[^>]*>/g, '')
+  .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'))
+  + c.children.filter((k) => k.tagName !== 'BUTTON').map(storyText).join('');
 const shown = () => el.children.filter((c) => c.classList.contains('block'))
-  .map((c) => [c.dataset.seq ? Number(c.dataset.seq) : null, c.classList.contains('typing'), c.textContent]);
+  .map((c) => [c.dataset.seq ? Number(c.dataset.seq) : null, c.classList.contains('typing'), storyText(c)]);
 async function until(cond, ms) {
   const t0 = Date.now();
   while (!cond()) { if (Date.now() - t0 > ms) return false; await sleep(5); }
