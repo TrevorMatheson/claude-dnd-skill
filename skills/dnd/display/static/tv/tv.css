@@ -44,47 +44,58 @@ body { font-family: var(--f-body); overflow: hidden; }
 .stage[data-mode="minimal"] .layer > .inputbar { grid-column: 1; }
 .stage[data-mode="minimal"] .inputbar { justify-self: center; width: min(100%, 56rem); }
 
-/* Modules: thin rules between them, no boxes. */
+/* Modules: thin rules between them, no boxes. Every panel and input-bar
+   text is at least 1.75rem (28px at 1080p), D8's couch-distance floor. */
 .mod { display: grid; gap: .875rem; align-content: start; }
 .mod + .mod { padding-top: 1.375rem; border-top: 1px solid var(--panel-line); }
 .mod-title {
-  margin: 0; font-family: var(--f-label); font-size: var(--label-size); font-weight: 400;
+  margin: 0; font-family: var(--f-label); font-size: 1.75rem; font-weight: 400;
   font-style: var(--label-style); letter-spacing: var(--label-track); text-transform: var(--label-case);
   color: var(--accent);
 }
-.mod-empty { margin: 0; font-size: 1.3125rem; font-style: italic; color: var(--ink-dim); }
+/* A panel stacking 2–3 modules goes compact rather than shrinking text:
+   no class/AC line, no status label on finished quests (the strike shows
+   it), and a faded bottom edge if it still runs long. */
+.side[data-count="2"] .pc-class, .side[data-count="3"] .pc-class,
+.side[data-count="2"] .pc-meta.plain, .side[data-count="3"] .pc-meta.plain,
+.side[data-count="2"] .q-done, .side[data-count="3"] .q-done { display: none; }
+.side[data-count="2"] .mod + .mod, .side[data-count="3"] .mod + .mod { padding-top: 1rem; }
+.side[data-count="3"] { gap: 1rem;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 4rem), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 4rem), transparent); }
+.mod-empty { margin: 0; font-size: 1.75rem; font-style: italic; color: var(--ink-dim); }
 .pc { display: grid; gap: .375rem; }
 .pc-top { display: flex; justify-content: space-between; align-items: baseline; gap: .625rem; }
-.pc-name { font-family: var(--f-display); font-size: 1.75rem; line-height: 1.1; }
-.pc-hp { font-size: 1.5rem; font-variant-numeric: tabular-nums; color: var(--ink-dim); white-space: nowrap; }
+.pc-name { font-family: var(--f-display); font-size: 2rem; line-height: 1.1; }
+.pc-hp { font-size: 1.75rem; font-variant-numeric: tabular-nums; color: var(--ink-dim); white-space: nowrap; }
 .pc-hp b { color: var(--ink); font-weight: 500; }
 .bar { height: .5rem; border-radius: 99px; background: rgba(255,255,255,.10); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--hp); border-radius: inherit; transition: width .6s ease; }
 .bar i.low { background: var(--hp-low); }
-.pc-meta { font-size: 1.25rem; color: var(--ink-dim); display: flex; gap: .625rem; flex-wrap: wrap; align-items: center; }
-.chip { font-size: 1.125rem; padding: .125rem .625rem; border-radius: 99px; border: 1px solid currentColor; color: var(--cond); line-height: 1.4; }
-.turn-round { font-family: var(--f-display); font-size: 1.5rem; color: var(--ink-dim); }
-.turns { margin: 0; padding: 0; list-style: none; display: grid; gap: .375rem; font-size: 1.5rem; }
+.pc-meta { font-size: 1.75rem; color: var(--ink-dim); display: flex; gap: .625rem; flex-wrap: wrap; align-items: center; }
+.chip { font-size: 1.75rem; padding: 0 .625rem; border-radius: 99px; border: 1px solid currentColor; color: var(--cond); line-height: 1.4; }
+.turn-round { font-family: var(--f-display); font-size: 1.75rem; color: var(--ink-dim); }
+.turns { margin: 0; padding: 0; list-style: none; display: grid; gap: .375rem; font-size: 1.75rem; }
 .turns li { padding: .125rem .625rem; border-left: 3px solid transparent; color: var(--ink-dim); }
 .turns li.now { color: var(--ink); border-left-color: var(--accent); background: var(--accent-soft); }
-.quest { font-size: 1.5rem; line-height: 1.35; display: grid; gap: .125rem; }
-.quest small { font-size: 1.1875rem; color: var(--ink-dim); }
+.quest { font-size: 1.75rem; line-height: 1.35; display: grid; gap: .125rem; }
+.quest small { font-size: 1.75rem; color: var(--ink-dim); }
 .quest.done { color: var(--ink-dim); text-decoration: line-through; text-decoration-color: var(--panel-line); }
-.clock { font-family: var(--f-display); font-size: 2.5rem; line-height: 1.1; }
-.clock small { display: block; font-family: var(--f-body); font-size: 1.3125rem; color: var(--ink-dim); margin-top: .375rem; }
-.effect { font-size: 1.3125rem; color: var(--ink-dim); display: flex; justify-content: space-between; gap: .75rem; }
+.clock { font-family: var(--f-display); font-size: 2.75rem; line-height: 1.1; }
+.clock small { display: block; font-family: var(--f-body); font-size: 1.75rem; color: var(--ink-dim); margin-top: .375rem; }
+.effect { font-size: 1.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; gap: .75rem; }
 .effect b { font-weight: 500; color: var(--ink); white-space: nowrap; }
 
 /* The input bar: who the table is waiting on, and a pip per player. */
 .inputbar {
   display: flex; justify-content: space-between; align-items: center; gap: 1.25rem;
   min-height: 2.5rem; padding: .875rem .75rem 0; border-top: 1px solid var(--panel-line);
-  font-size: 1.5rem; color: var(--ink-dim);
+  font-size: 1.75rem; color: var(--ink-dim);
 }
 .inputbar .wait b { color: var(--ink); font-weight: 500; }
 .inputbar .wait.dm { font-style: italic; }
 .pips { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
-.pip { font-size: 1.25rem; padding: .25rem .875rem; border-radius: 99px; border: 1px solid var(--panel-line); }
+.pip { font-size: 1.75rem; padding: 0 .875rem; border-radius: 99px; border: 1px solid var(--panel-line); }
 .pip.on { color: var(--ink); border-color: var(--accent); }
 
 .scene {

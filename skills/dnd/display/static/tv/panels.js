@@ -162,7 +162,8 @@
       const hp = pc.hp.current != null || pc.hp.max != null
         ? `<span class="pc-hp"><b>${esc(pc.hp.current ?? '—')}</b> / ${esc(pc.hp.max ?? '—')}</span>` : '';
       const chips = pc.conditions.map((c) => `<span class="chip">${esc(c)}</span>`).join('');
-      const meta = pc.meta || chips ? `<div class="pc-meta">${esc(pc.meta)}${chips}</div>` : '';
+      const cls = pc.meta ? `<span class="pc-class">${esc(pc.meta)}</span>` : '';
+      const meta = cls || chips ? `<div class="pc-meta${chips ? '' : ' plain'}">${cls}${chips}</div>` : '';
       return `<div class="pc"><div class="pc-top"><span class="pc-name">${esc(pc.name)}</span>${hp}</div>`
         + `<div class="bar"><i${pc.low ? ' class="low"' : ''} style="width:${pc.hpPct.toFixed(1)}%"></i></div>${meta}</div>`;
     }).join('');
@@ -180,8 +181,8 @@
     if (!qs.length) return '<p class="mod-empty">No quests yet</p>';
     return qs.map((q) => {
       const s = q.status.toLowerCase();
-      const st = s && s !== 'active' ? `<small>${esc(q.status)}</small>` : '';
       const done = s === 'resolved' || s === 'failed';
+      const st = s && s !== 'active' ? `<small${done ? ' class="q-done"' : ''}>${esc(q.status)}</small>` : '';
       return `<div class="quest${done ? ' done' : ''}">${esc(q.name)}${st}</div>`;
     }).join('');
   }
@@ -224,8 +225,8 @@
       const right = panelHtml(resolved.right, stats);
       if (els.left && left !== last.left) { els.left.innerHTML = left; last.left = left; }
       if (els.right && right !== last.right) { els.right.innerHTML = right; last.right = right; }
-      if (els.left) els.left.hidden = !resolved.left.length;
-      if (els.right) els.right.hidden = !resolved.right.length;
+      if (els.left) { els.left.hidden = !resolved.left.length; els.left.dataset.count = resolved.left.length; }
+      if (els.right) { els.right.hidden = !resolved.right.length; els.right.dataset.count = resolved.right.length; }
       if (els.bar && wait) {
         const v = wait.view();
         const pips = wait.party().map((n) =>
