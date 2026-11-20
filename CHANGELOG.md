@@ -12,6 +12,13 @@ Versions before **1.6.0** are reconstructed retroactively from git history; the 
 
 From the first live table test (see `docs/ROADMAP.md`).
 
+**Display foundation (new TV page, on trial at `/tv`)**
+- A new TV page at `/tv` in the Ink & Margin theme: the story feed types narration in step with its voice, two configurable side panels (party, turn order, battle map, quests, world clock) in Story, Tactical or Minimal presets, combat layouts with the map and a turn bar, replay ▶ on a block, a "reconnecting" badge and catch-up with no duplicated blocks. The old page at `/` is unchanged until a game night has run on `/tv`.
+- `/layout` on the laptop sets the layout, forces combat or story, and holds the voice settings: narrator, NPC engine (Kokoro only, or Gemini falling back to Kokoro), volume, speed, "Read player actions aloud", and a cast list to preview and change anyone's voice. Settings are saved per campaign in `display.json`.
+- Every NPC speaks in its own voice. An NPC without one is given a free Kokoro voice, written to `npcs.md`; past the ~28 voices, new NPCs get a blend of two. No NPC shares the narrator's or a player character's voice. `cast.py` lists free voices and sets them. In Gemini mode each NPC falls back to its own Kokoro voice when the quota runs out, and the laptop (never the TV) says so.
+- Player characters have voices; with "Read player actions aloud" on, typed actions are read in the character's voice before the DM answers (Talk isn't read back).
+- Rolling initiative starts combat mode and `combat.py end` finishes it.
+
 **Table safety**
 - The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
 - plugin.json / marketplace.json / SKILL.md versions match VERSION again (they said 2.4.0), with a test.

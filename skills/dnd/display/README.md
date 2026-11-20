@@ -82,6 +82,31 @@ to the sidebar on load.
 
 ---
 
+## The new TV page (`/tv`, on trial)
+
+The display overhaul's new TV page runs beside the old one while it is on
+trial. Nothing about the old page (`/`) changes until one real game night
+has run on `/tv` with no fallback; then `/` switches and the old page stays
+at `/old` (phones keep it via `?char=`).
+
+| Page | Open it on | What it is |
+|---|---|---|
+| `/tv` | the TV | Story feed with narration typed in step with its voice, two side panels (party, turn order, battle map, quests, world clock), combat layouts with the map and a turn bar, reconnect catch-up |
+| `/layout` | this laptop (localhost only) | Layout presets and panels, the combat/story override, and **Voices**: narrator, NPC engine (Kokoro only, or Gemini falling back to Kokoro), volume, speed, "Read player actions aloud", the Gemini quota note, and the cast list |
+
+Settings are saved per campaign in `<campaign>/display.json`. Voices live
+with the characters: `- **Voice:**` in each NPC's `npcs.md` section and under
+`## Identity` in each character file. Every NPC gets its own Kokoro voice
+(the display assigns a free one if an NPC speaks without one, and blends two
+once the ~28 voices run out); no NPC ever shares the narrator's or a player
+character's voice. From the terminal:
+
+```bash
+python $DISPLAY/cast.py voices --free -c <campaign>           # free voices by accent and sex
+python $DISPLAY/cast.py set -c <campaign> --npc "Name" bf_emma
+python $DISPLAY/cast.py set -c <campaign> --pc  "Name" am_liam
+```
+
 ## How it works
 
 | Component | Role |
@@ -94,6 +119,10 @@ to the sidebar on load.
 | `dm_help.py` | One-shot hint fired by the ◈ DM Help button on the display |
 | `audio.py` | Scans narration for SFX triggers; serves synthesized WAV files to browsers |
 | `index.html` | Typewriter rendering, sky canvas, particle system, CSS gradient crossfades |
+| `templates/tv.html`, `static/tv/` | The new TV page (`/tv`) |
+| `templates/layout.html`, `static/layout/` | The laptop's layout and voices page (`/layout`) |
+| `cast.py` | Who speaks in which voice (NPCs, player characters, narrator) |
+| `display_config.py` | Per-campaign `display.json` (layout and voice settings) |
 
 ### Scene detection
 

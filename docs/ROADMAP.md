@@ -255,7 +255,9 @@ optional mirror.**
 ## Phase 5 — display overhaul (specced via `/grill-me`)
 
 The foundation (new TV page, panels, combat mode, theme) is specced in
-`docs/specs/2026-11-17-display-foundation.md`. The other four are specced too
+`docs/specs/2026-11-17-display-foundation.md`. Built through S16 on
+`feat/display-foundation` (2026-11-20): `/tv` and `/layout` run beside the
+old page; S17 (switching `/`) waits on one real game night on `/tv`. The other four are specced too
 (build order follows the dependencies):
 
 1. **Map** — `docs/specs/2026-11-17-battle-map.md` (approved): our own map,

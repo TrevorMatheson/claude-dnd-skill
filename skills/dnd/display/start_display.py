@@ -179,11 +179,14 @@ def start(lan: bool) -> int:
         print(f"The display did not answer within 15 s - see {LOG_FILE}")
         return 1
     print(f"Display running - TV / this computer: {local}")
+    print(f"  Layout & voices (this laptop): {local.rstrip('/')}/layout")
     if lan:
         ip = lan_ip()
         if ip:
-            print(f"  On the TV (same network):   http://{ip}:{PORT}")
-            print(f"  On each phone:              http://{ip}:{PORT}/?char=<character name>")
+            scheme = local.split("://", 1)[0]
+            print(f"  On the TV (same network):   {scheme}://{ip}:{PORT}")
+            print(f"  TV (new, on trial):         {scheme}://{ip}:{PORT}/tv")
+            print(f"  On each phone:              {scheme}://{ip}:{PORT}/?char=<character name>")
             if not _ping(f"http://{ip}:{PORT}", timeout=2):
                 print("  ! That address doesn't answer from this machine - check the firewall "
                       "(`python doctor.py` in scripts/ explains the rule).")
