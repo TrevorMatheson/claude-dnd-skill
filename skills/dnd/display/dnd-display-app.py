@@ -1420,6 +1420,28 @@ def _display_config() -> dict:
         return copy.deepcopy(_display_cache["config"])
 
 
+_voice_note = {"text": "", "until": 0.0}
+
+
+def _voice_note_set(wait: float) -> None:
+    hours = max(1, round(wait / 3600))
+    _voice_note["text"] = (f"NPCs moved to Kokoro — Gemini quota used up, "
+                           f"back in about {hours} h")
+    _voice_note["until"] = _time.time() + wait
+
+
+def _display_status() -> dict:
+    """Notes for the laptop page (never the TV): the Gemini quota note while
+    the quota window lasts."""
+    status = {}
+    now = _time.time()
+    # The note lasts as long as the quota window: when Gemini is back (or the
+    # window is cleared), it goes.
+    if _voice_note["text"] and now < _voice_note["until"] and now < _tts_quota_until:
+        status["voice_note"] = _voice_note["text"]
+    return status
+
+
 def _display_reload() -> None:
     """Forget the cached display settings (display.json changed on disk)."""
     with _display_lock:
@@ -1451,7 +1473,7 @@ def display_config_get():
         presets=display_config.PRESETS,
         modules=list(display_config.MODULES),
         mode_override=_mode_override,
-        status={},
+        status=_display_status(),
     )
 
 
@@ -1697,9 +1719,11 @@ def chunk():
     # Voice for read-aloud: an explicit "voice" on the block wins; an NPC
     # otherwise uses the **Voice:** line of its npcs.md entry, a tutor hint
     # the campaign's tutor_voice. Narration keeps the narrator voice (unset).
-    voice = _block_voice(data, is_npc, is_tutor)
+    voice, fallback = _block_voices(data, is_npc, is_tutor)
     if voice:
         payload["voice"] = voice
+    if fallback:
+        payload["voice_fallback"] = fallback
 
     if is_action:
         payload["action"] = data["action"]
@@ -1726,6 +1750,8 @@ def chunk():
     log_entry: dict = {"text": cleaned}
     if payload.get("voice"):
         log_entry["voice"] = payload["voice"]
+    if payload.get("voice_fallback"):
+        log_entry["voice_fallback"] = payload["voice_fallback"]
     if is_action:
         log_entry["action"] = data["action"]
     elif is_player:
@@ -2280,33 +2306,51 @@ def _active_campaign_name() -> Optional[str]:
 
 _NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z_]+)", re.IGNORECASE | re.MULTILINE)
 _TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z_]+)\s*$", re.MULTILINE)
-def _npc_voices(campaign: str, npc: str) -> str:
-    """The NPC's own Kokoro voice from npcs.md. An NPC that speaks with no
-    voice is given a free one, written back to npcs.md (D19); an old
-    Gemini-named Voice: line is migrated (D21). Never the narrator's or a
-    player character's voice."""
+def _npc_voices(campaign: str, npc: str) -> tuple:
+    """(voice, fallback) for an NPC block.
+
+    Every NPC has its own Kokoro voice in npcs.md: one that speaks with none
+    is given a free one, written back (D19). In Kokoro mode (the default) the
+    block is read in it and Gemini is never asked. In Gemini mode the block
+    carries the NPC's Gemini voice, with its own Kokoro voice as the fallback
+    for when Gemini can't speak (D17, D21). The engine is read per line, so a
+    change on the laptop applies from the next one."""
     if _cast is None or not str(npc or "").strip():
-        return ""
+        return "", ""
     try:
         engine = _display_config().get("voice", {}).get("npc_engine", "kokoro")
-        return _cast.npc_voices(campaign, npc, engine=engine).get("voice", "")
+        got = _cast.npc_voices(campaign, npc, engine=engine)
     except (OSError, ValueError, TypeError) as exc:
         print(f"[cast] could not resolve a voice for {npc!r}: {exc}", flush=True)
-        return ""
+        return "", ""
+    kokoro, gemini = got.get("voice", ""), got.get("gemini", "")
+    if engine == "gemini" and gemini:
+        return gemini, kokoro
+    return kokoro, ""
 
 
 def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
     """The read-aloud voice for one block, or "" for the narrator voice."""
+    return _block_voices(data, is_npc, is_tutor)[0]
+
+
+def _block_voices(data: dict, is_npc: bool, is_tutor: bool) -> tuple:
+    """(voice, fallback): the read-aloud voice for one block ("" for the
+    narrator voice) and, for an NPC in Gemini mode, its own Kokoro voice."""
     if _tts is None:
-        return ""
+        return "", ""
     v = str(data.get("voice") or "").strip()
     if _valid_voice(v):
-        return v
+        return v, ""
     name = _active_campaign_name()
     if not name:
-        return ""
+        return "", ""
     if is_npc:
         return _npc_voices(name, str(data.get("npc", "")))
+    return _block_voice_rest(name, is_tutor), ""
+
+
+def _block_voice_rest(name: str, is_tutor: bool) -> str:
     if is_tutor:
         try:
             st = (_find_campaign(name) / "state.md").read_text(encoding="utf-8", errors="replace")
@@ -2604,8 +2648,15 @@ def tts_synthesize():
                         headers={"X-Audio-Chars": str(len(text)), "X-Audio-Voice": used,
                                  "X-Audio-Engine": engine, "Cache-Control": "no-store"})
 
+    # An NPC block in Gemini mode carries its own Kokoro voice (D21); without
+    # one (the old page) the shared stand-in table picks a similar voice.
+    fallback = str(data.get("fallback") or "").strip()
+    if not getattr(_tts, "is_kokoro", lambda v: False)(fallback):
+        fallback = ""
+
     def _local(v):
-        return _pcm(_tts.kokoro_synthesize(text, v, speed=speed), "kokoro", _tts.kokoro_standin(v))
+        v = fallback or _tts.kokoro_standin(v)
+        return _pcm(_tts.kokoro_synthesize(text, v, speed=speed), "kokoro", v)
 
     is_local = getattr(_tts, "is_kokoro", lambda v: False)(voice)
     # The TV reads narration a sentence at a time and asks for the local voice
@@ -2652,6 +2703,8 @@ def tts_synthesize():
                 global _voice_next_check
                 _gemini_state["on"], _gemini_state["reason"] = False, _quota_reason(wait)
                 _voice_next_check = _time.time() + wait
+                # For the laptop page only (D17): the TV shows nothing.
+                _voice_note_set(wait)
                 return _local(voice)
             _broadcast({"tts_quota": {"daily": e.daily_quota, "retry_after": int(wait),
                                       "quota": e.quota_id}})

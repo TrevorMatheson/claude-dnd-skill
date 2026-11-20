@@ -370,10 +370,58 @@ def _append_stub(lines: list, name: str, voice: str) -> None:
 
 def npc_voices(campaign, name: str, engine: str = "kokoro") -> dict:
     """Make sure the NPC has its own Kokoro voice (writing npcs.md when it
-    doesn't) and return {"voice": kokoro, "gemini": gemini-or-""}."""
+    doesn't) and return {"voice": kokoro, "gemini": gemini-or-""}.
+
+    With engine "gemini" the NPC also gets a Gemini voice (the least-used one,
+    never a Gemini narrator's), written as `- **Gemini voice:**` (D21)."""
     name = " ".join(str(name or "").split())
     if not name:
         return {"voice": "", "gemini": ""}
+    with _lock:
+        res = _npc_kokoro(campaign, name)
+        if engine == "gemini" and res.get("voice"):
+            res["gemini"] = _npc_gemini(campaign, name, res.get("gemini", ""))
+        return res
+
+
+def _gemini_of(lines: list, sec: dict) -> str:
+    if sec is None or sec["gemini_idx"] is None:
+        return ""
+    v = _value(lines[sec["gemini_idx"]].split(":", 1)[-1])
+    return v if is_gemini(v) else ""
+
+
+def _npc_gemini(campaign, name: str, current: str) -> str:
+    """The NPC's Gemini voice, assigned and written back when it has none or
+    holds the narrator's."""
+    narrator = narrator_voice(campaign)
+    if is_gemini(current) and current != narrator:
+        return current
+    lines, eol, exists = _npc_lines(campaign)
+    if not exists:
+        return ""
+    sections = _npc_sections(lines)
+    sec = _find(sections, name)
+    if sec is None:
+        return ""
+    held = [_gemini_of(lines, s) for s in sections if s is not sec]
+    pool = sorted(v for v in tts.VALID_VOICES if is_gemini(v) and v != narrator)
+    if not pool:
+        return ""
+    voice = min(pool, key=lambda v: (held.count(v), pool.index(v)))
+    line = f"- **Gemini voice:** {voice}"
+    if sec["gemini_idx"] is not None:
+        lines[sec["gemini_idx"]] = line
+    elif sec["voice_idx"] is not None:
+        lines.insert(sec["voice_idx"] + 1, line)
+    else:
+        lines.insert(sec["start"] + 1, line)
+    _write(_npcs_path(campaign), lines, eol)
+    return voice
+
+
+def _npc_kokoro(campaign, name: str) -> dict:
+    """npc_voices' Kokoro half (D19): see npc_voices."""
     with _lock:
         path = _npcs_path(campaign)
         lines, eol, exists = _npc_lines(campaign)
