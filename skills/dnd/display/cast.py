@@ -23,7 +23,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import json
+
 import os
 import re
 import sys
@@ -38,11 +38,73 @@ for _p in (_HERE, _SCRIPTS):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import time                                # noqa: E402
 import tts                      # noqa: E402  voice tables only; no network on import
 import display_config           # noqa: E402
-from paths import find_campaign  # noqa: E402
+import utf8io                   # noqa: E402  lossless reads of legacy GBK files
+from paths import find_campaign, campaigns_dir  # noqa: E402
 
-_lock = threading.RLock()
+
+class _CastLock:
+    """One writer at a time across threads AND processes: the display server
+    and the cast.py CLI both rewrite npcs.md and the character files. The
+    thread lock is re-entrant; the lock file is taken on the outermost entry
+    and a stale one (a crashed writer) is broken after 10 s."""
+
+    def __init__(self):
+        self._t = threading.RLock()
+        self._depth = 0
+        self._fd = None
+
+    def _path(self) -> str:
+        d = campaigns_dir()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        return str(d / ".cast.lock")
+
+    def __enter__(self):
+        self._t.acquire()
+        self._depth += 1
+        if self._depth == 1:
+            path, deadline = self._path(), time.time() + 5.0
+            while True:
+                try:
+                    self._fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    break
+                except FileExistsError:
+                    try:
+                        if time.time() - os.path.getmtime(path) > 10.0:
+                            os.unlink(path)
+                            continue
+                    except OSError:
+                        pass
+                    if time.time() > deadline:
+                        self._fd = None      # go ahead rather than hang the table
+                        break
+                    time.sleep(0.02)
+                except OSError:
+                    self._fd = None          # read-only root: thread lock only
+                    break
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if self._depth == 1 and self._fd is not None:
+                os.close(self._fd)
+                self._fd = None
+                try:
+                    os.unlink(self._path())
+                except OSError:
+                    pass
+        finally:
+            self._depth -= 1
+            self._t.release()
+        return False
+
+
+_lock = _CastLock()
 
 # Subheadings that templates/npcs.md puts under each NPC: not cast members.
 _NOT_NPCS = {"personality", "relationships", "notes"}
@@ -101,13 +163,13 @@ def _camp(campaign) -> Path:
 def _read(path: Path):
     """(lines without EOLs, eol) or (None, "\\n") when missing/unreadable."""
     try:
-        raw = path.read_bytes()
+        # UTF-8 as is (a BOM stays on line 1 and is written back); a legacy
+        # GBK file decodes losslessly and is written back as UTF-8.
+        text = utf8io.read_text(path)
     except OSError:
         return None, "\n"
-    try:
-        text = raw.decode("utf-8")      # a BOM stays on line 1 and is written back
-    except UnicodeDecodeError:
-        print(f"[cast] {path.name} is not UTF-8: left unchanged, voices not saved",
+    except ValueError:
+        print(f"[cast] {path.name} is neither UTF-8 nor GBK: left unchanged, voices not saved",
               file=sys.stderr, flush=True)
         return None, "\n"
     eol = "\r\n" if "\r\n" in text else "\n"
@@ -120,7 +182,15 @@ def _write(path: Path, lines: list, eol: str) -> None:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        os.replace(tmp, str(path))
+        for attempt in range(20):
+            try:
+                os.replace(tmp, str(path))
+                break
+            except PermissionError:
+                # Windows: an editor or another reader has the file open.
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -136,7 +206,13 @@ def _is_voice_value(raw: str) -> bool:
     """A Voice: line holds a voice id, a placeholder `<...>` or nothing. Prose
     such as `Voice: gravelly baritone` is a description, not ours to touch."""
     v = raw.strip().strip("*").strip()
-    return not v or v.startswith("<") or len(v.split()) == 1
+    if not v or v.startswith("<"):
+        return True
+    if len(v.split()) != 1:
+        return False
+    # A voice id (af_bella, a+b) or a known voice name (Kore); a single word
+    # such as "Gravelly" is the DM's description and is left alone.
+    return tts.valid_voice(v) or bool(re.fullmatch(r"[a-z]{2}_[a-z]+(\+[a-z]{2}_[a-z]+)?", v))
 
 
 def _value(raw: str) -> str:
@@ -260,13 +336,9 @@ def pc_voices(campaign) -> set:
 def narrator_voice(campaign, default: Optional[str] = tts.DEFAULT_NARRATOR) -> Optional[str]:
     """display.json voice.narrator, else state.md tts_voice, else `default`."""
     folder = _camp(campaign)
-    try:
-        with open(folder / display_config.FILENAME, encoding="utf-8") as f:
-            v = ((json.load(f) or {}).get("voice") or {}).get("narrator")
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
+    v = (display_config.load(folder).get("voice") or {}).get("narrator")
+    if isinstance(v, str) and v.strip():
+        return v.strip()
     lines, _ = _read(folder / "state.md")
     if lines:
         m = _STATE_VOICE.search("\n".join(lines))
@@ -539,7 +611,7 @@ def _pc_path(campaign, name: str) -> Optional[Path]:
 def _set_pc(campaign, name: str, voice: str) -> None:
     if voice not in tts.KOKORO_VOICES:
         raise ValueError(f"{voice!r} is not a Kokoro voice (player characters get a single voice)")
-    if voice == narrator_voice(campaign):
+    if voice in (narrator_voice(campaign), heard_narrator(campaign)):
         raise ValueError(f"{voice} is the narrator's voice")
     path = _pc_path(campaign, name)
     if path is None:
@@ -673,6 +745,10 @@ def _cli_set(args) -> int:
     except ValueError as exc:
         print(f"cast.py: {exc}", file=sys.stderr)
         return 2
+    except OSError as exc:
+        print(f"cast.py: could not save ({exc}). Is the file open somewhere? Try again.",
+              file=sys.stderr)
+        return 3
     who = name if name else "the narrator"
     print(f"{who}: {args.voice}")
     return 0

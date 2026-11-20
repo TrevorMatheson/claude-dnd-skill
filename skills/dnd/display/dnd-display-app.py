@@ -448,6 +448,10 @@ def _read_actions_aloud(inputs) -> None:
                 voice = _cast.pc_voice(name, character)
             except (OSError, ValueError) as exc:
                 print(f"[cast] no voice for {character!r}: {exc}", flush=True)
+        if not voice:
+            # No sheet for this name (or it can't be read): reading it in the
+            # narrator's voice would make it sound like the DM (D22).
+            continue
         reads.append({"character": character, "text": text, "voice": voice})
     if reads:
         _broadcast({"read_actions": reads})
@@ -1450,12 +1454,20 @@ def _campaign_dir():
 def _display_config() -> dict:
     """The active campaign's display settings (defaults when none are saved)."""
     name = _active_campaign_name()
+    folder = _campaign_dir()
+    try:
+        mtime = os.path.getmtime(os.path.join(str(folder), display_config.FILENAME)) if folder else 0.0
+    except OSError:
+        mtime = 0.0
     with _display_lock:
-        if _display_cache["config"] is None or _display_cache["campaign"] != name:
-            folder = _campaign_dir()
+        # Re-read when display.json changed on disk (cast.py set --narrator
+        # from the terminal), not only when the campaign changes.
+        if (_display_cache["config"] is None or _display_cache["campaign"] != name
+                or _display_cache.get("mtime") != mtime):
             _display_cache["config"] = (display_config.load(folder) if folder
                                         else display_config.default())
             _display_cache["campaign"] = name
+            _display_cache["mtime"] = mtime
         return copy.deepcopy(_display_cache["config"])
 
 
@@ -1525,7 +1537,8 @@ def display_config_post():
         return jsonify(error="Send the settings as a JSON object."), 400
     # A partial post changes only what it names: {"voice": {"speed": 1.2}}
     # keeps the layout and every other voice setting (the narrator included).
-    merged = _display_config()
+    folder = _campaign_dir()
+    merged = display_config.load(folder) if folder else _display_config()
     if isinstance(data.get("layout"), dict):
         merged["layout"] = data["layout"]
     if isinstance(data.get("voice"), dict):
@@ -2350,7 +2363,6 @@ def _active_campaign_name() -> Optional[str]:
         return None
 
 
-_NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z_]+)", re.IGNORECASE | re.MULTILINE)
 _TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z_]+)\s*$", re.MULTILINE)
 def _npc_voices(campaign: str, npc: str) -> tuple:
     """(voice, fallback) for an NPC block.
@@ -2373,11 +2385,6 @@ def _npc_voices(campaign: str, npc: str) -> tuple:
     if engine == "gemini" and gemini:
         return gemini, kokoro
     return kokoro, ""
-
-
-def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
-    """The read-aloud voice for one block, or "" for the narrator voice."""
-    return _block_voices(data, is_npc, is_tutor)[0]
 
 
 def _block_voices(data: dict, is_npc: bool, is_tutor: bool) -> tuple:
@@ -2704,7 +2711,7 @@ def tts_synthesize():
         fallback = ""
 
     def _local(v):
-        v = fallback or _tts.kokoro_standin(v)
+        v = v if _tts.is_kokoro(v) else (fallback or _tts.kokoro_standin(v))
         return _pcm(_tts.kokoro_synthesize(text, v, speed=speed), "kokoro", v)
 
     is_local = getattr(_tts, "is_kokoro", lambda v: False)(voice)
@@ -2784,7 +2791,9 @@ def tts_voice():
         return jsonify({"error": "invalid voice"}), 400
     name = _active_campaign_name()
     saved = False
-    if _cast is not None and name:
+    # The old page's picker still offers Gemini names: those stay in state.md
+    # (as before) so display.json never holds a narrator the TV can't voice.
+    if _cast is not None and name and _tts.is_kokoro(voice):
         # display.json is where the narrator is read from first; an NPC that
         # held this voice is given another (no NPC sounds like the narrator).
         try:
@@ -2795,6 +2804,7 @@ def tts_voice():
         except OSError as exc:
             print(f"[cast] narrator voice not saved to display.json: {exc}", flush=True)
         _display_reload()
+        _broadcast(_display_payload())      # the TV reads its narrator from this
     ok = _write_narrator_voice(voice) or saved
     return jsonify({"voice": voice, "persisted": ok}), 200
 
@@ -2805,6 +2815,13 @@ def cast_get():
     name = _active_campaign_name()
     if _cast is None or not name:
         return jsonify(narrator=_read_narrator_voice(), pcs=[], npcs=[], voices=[])
+    if not _host_only():
+        # Anyone else sees the list as it is; only the host's laptop page
+        # fills in missing voices (that writes the campaign's files).
+        try:
+            return jsonify(_cast.cast_list(name))
+        except (OSError, ValueError) as exc:
+            return jsonify(error=str(exc)), 500
     try:
         first = _cast.cast_list(name)
         for pc in first["pcs"]:
@@ -2846,6 +2863,7 @@ def cast_post():
     if kind == "narrator":
         _write_narrator_voice(voice)
         _display_reload()
+        _broadcast(_display_payload())      # the TV reads its narrator from this
     return jsonify(_cast.cast_list(name))
 
 

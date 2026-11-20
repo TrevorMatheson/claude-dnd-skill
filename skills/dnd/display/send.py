@@ -533,7 +533,7 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #      {"action": "Havoc", "text": "Havoc swings at the rat."},
 #      {"dice": true, "text": "Havoc: 2d20 adv [7, 16] +5 = 21 vs AC 12 — HIT"},
 #      {"text": "The blade bites ..."},                        # narration
-#      {"npc": "Mira", "text": "Behind you!", "voice": "Kore"},
+#      {"npc": "Mira", "text": "Behind you!"},   # read in Mira's own voice (npcs.md)
 #      {"tutor": true, "text": "Advantage: roll two d20s, keep the higher."},
 #      {"xp_award": {"names": ["Havoc"], "xp": 25, "reason": "rat"}},
 #      {"inspiration_award": "Anony", "reason": "great line"}],
