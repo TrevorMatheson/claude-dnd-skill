@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="dnd-token" content="{{ lan_token }}">
+<title>DnD — TV layout</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/app_icon_32.png">
+<link rel="stylesheet" href="/static/tv/tokens.css">
+<link rel="stylesheet" href="/static/layout/layout.css">
+</head>
+<body>
+<main id="layout-page" class="lp">
+  <header class="lp-head">
+    <h1>TV layout</h1>
+    <p>Changes reach the TV at once and are saved with the campaign. <a href="/tv" target="_blank" rel="noopener">Open the TV page</a></p>
+    <p id="lp-status" class="lp-status" role="status" aria-live="polite"></p>
+  </header>
+
+  <section class="lp-section" aria-labelledby="lp-presets-h">
+    <h2 id="lp-presets-h">Preset</h2>
+    <div id="lp-presets" class="lp-presets"></div>
+    <p id="lp-custom" class="lp-note" hidden>Custom: the panels below don't match a preset.</p>
+  </section>
+
+  <section class="lp-section" aria-labelledby="lp-panels-h">
+    <h2 id="lp-panels-h">Side panels</h2>
+    <p class="lp-note">Each side holds up to three modules, top to bottom. An empty side is hidden.</p>
+    <div class="lp-panels">
+      <div id="lp-left" class="lp-panel">
+        <h3>Left</h3>
+        <ol></ol>
+        <p class="empty lp-note">Empty</p>
+        <label><span class="sr">Add to the left panel</span><select></select></label>
+      </div>
+      <div class="lp-tv" aria-hidden="true">Narration</div>
+      <div id="lp-right" class="lp-panel">
+        <h3>Right</h3>
+        <ol></ol>
+        <p class="empty lp-note">Empty</p>
+        <label><span class="sr">Add to the right panel</span><select></select></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section" aria-labelledby="lp-override-h">
+    <h2 id="lp-override-h">Combat or story</h2>
+    <p class="lp-note">Auto switches to combat when a turn order is set and back when it's cleared. Combat or Story forces it until the next fight starts or ends.</p>
+    <div id="lp-override" class="lp-seg" role="group" aria-labelledby="lp-override-h"></div>
+  </section>
+</main>
+<script src="/static/layout/layout.js"></script>
+</body>
+</html>

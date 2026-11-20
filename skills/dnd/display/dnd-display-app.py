@@ -1377,6 +1377,13 @@ def tv():
     return render_template("tv.html", **_page_vars())
 
 
+@app.route("/layout")
+def layout_page():
+    """The host's TV layout page (spec D6). Changes are POSTed to
+    /display-config and /display-mode, which accept only the game computer."""
+    return render_template("layout.html", **_page_vars())
+
+
 # ─── Display settings (layout and voice, per campaign) ───────────────────────
 # Read from <campaign>/display.json on first use and again whenever the active
 # campaign changes. Written only when the host changes something.

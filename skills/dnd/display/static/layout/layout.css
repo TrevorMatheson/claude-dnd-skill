@@ -1,0 +1,51 @@
+/* The laptop's TV layout page. Uses the TV's theme tokens; sized for a
+   laptop screen in px, not the TV's 1080p rem scale. */
+
+html, body { margin: 0; background: #14100c; color: var(--ink); }
+body { font-family: var(--f-body); font-size: 16px; line-height: 1.5; }
+.lp { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+.lp h1, .lp h2, .lp h3 { font-family: var(--f-display); font-weight: 500; margin: 0; }
+.lp h1 { font-size: 30px; }
+.lp h2 { font-size: 21px; color: var(--accent); font-style: italic; }
+.lp h3 { font-size: 18px; }
+.lp a { color: var(--you); }
+.lp-head p { margin: 6px 0 0; color: var(--ink-dim); }
+.lp-status { min-height: 1.5em; }
+.lp-status[data-kind="ok"] { color: var(--hp); }
+.lp-status[data-kind="error"] { color: var(--accent); }
+.lp-section { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--panel-line); display: grid; gap: 12px; }
+.lp-note { margin: 0; color: var(--ink-dim); font-size: 14px; }
+
+.lp button, .lp select {
+  font: inherit; color: var(--ink); background: rgba(255,255,255,.04);
+  border: 1px solid var(--panel-line); border-radius: 6px; cursor: pointer;
+}
+.lp button:hover:not(:disabled), .lp select:hover:not(:disabled) { border-color: var(--ink-dim); }
+.lp button:focus-visible, .lp select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lp button:disabled, .lp select:disabled { opacity: .4; cursor: default; }
+.lp button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+
+.lp-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.preset { display: grid; gap: 4px; padding: 12px 14px; text-align: left; }
+.preset strong { font-family: var(--f-display); font-size: 18px; font-weight: 500; }
+.preset small { color: var(--ink-dim); font-size: 13px; }
+
+.lp-panels { display: grid; grid-template-columns: 1fr 120px 1fr; gap: 12px; align-items: start; }
+.lp-panel { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--panel-line); border-radius: 8px; }
+.lp-panel ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.lp-panel li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center; }
+.lp-panel li button { width: 32px; height: 32px; padding: 0; }
+.lp-panel select { width: 100%; padding: 6px 8px; }
+.lp-tv {
+  align-self: stretch; display: grid; place-items: center; min-height: 140px;
+  border: 1px dashed var(--panel-line); border-radius: 8px; color: var(--ink-dim); font-style: italic; font-size: 14px;
+}
+.lp-seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.lp-seg button { padding: 8px 18px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+
+@media (max-width: 640px) {
+  .lp-panels { grid-template-columns: 1fr; }
+  .lp-tv { display: none; }
+}
