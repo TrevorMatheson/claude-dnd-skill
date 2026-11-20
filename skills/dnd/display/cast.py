@@ -23,12 +23,12 @@ CLI:
 from __future__ import annotations
 
 import argparse
-
 import os
 import re
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -38,8 +38,7 @@ for _p in (_HERE, _SCRIPTS):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import time                                # noqa: E402
-import tts                      # noqa: E402  voice tables only; no network on import
+import tts                     # noqa: E402  voice tables only; no network on import
 import display_config           # noqa: E402
 import utf8io                   # noqa: E402  lossless reads of legacy GBK files
 from paths import find_campaign, campaigns_dir  # noqa: E402
@@ -82,6 +81,15 @@ class _CastLock:
                         pass
                     if time.time() > deadline:
                         self._fd = None      # go ahead rather than hang the table
+                        break
+                    time.sleep(0.02)
+                except PermissionError:
+                    # Windows: the old lock file is still being deleted (an
+                    # antivirus or indexer handle), or the folder is read-only.
+                    # Wait it out like a held lock; a read-only folder simply
+                    # reaches the deadline and goes ahead.
+                    if time.time() > deadline or not os.access(os.path.dirname(path), os.W_OK):
+                        self._fd = None
                         break
                     time.sleep(0.02)
                 except OSError:
@@ -667,9 +675,11 @@ def pc_voice(campaign, name: str) -> str:
 def _set_narrator(campaign, voice: str) -> None:
     if not tts.valid_voice(voice) or tts.blend_parts(voice):
         raise ValueError(f"{voice!r} is not a narrator voice")
-    if voice in pc_voices(campaign):
-        # D22: a read-aloud action must not sound like the DM.
-        raise ValueError(f"{voice} belongs to a player character")
+    # D22: a read-aloud action must not sound like the DM. A Gemini narrator is
+    # heard in the Kokoro default, so that is the voice to check.
+    heard = voice if is_kokoro(voice) else tts.DEFAULT_NARRATOR
+    if heard in pc_voices(campaign):
+        raise ValueError(f"{heard} belongs to a player character")
     folder = _camp(campaign)
     with _lock:
         cfg = display_config.load(folder)

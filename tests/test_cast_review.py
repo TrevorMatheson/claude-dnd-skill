@@ -124,5 +124,46 @@ class TestLegacyAndProse(_CampaignCase):
             self.cast.set_voice(self.name, "pc", "Mira", "bm_lewis")
 
 
+class TestFollowUps(_CampaignCase):
+    """Re-review follow-ups: a Gemini narrator is heard in the Kokoro default,
+    so it can't be chosen while a PC holds that voice; and the cross-process
+    lock is re-entrant, breaks a stale lock file and leaves none behind."""
+
+    def setUp(self):
+        super().setUp()
+        self.cast = _load_cast()
+
+    def test_gemini_narrator_refused_while_a_pc_holds_the_heard_voice(self):
+        self.display_narrator("bm_george")
+        self.pc("Mira", "bm_lewis")
+        with self.assertRaises(ValueError):
+            self.cast.set_voice(self.name, "narrator", None, "Kore")
+
+    def test_lock_reentrant_and_cleaned_up(self):
+        import os
+        lock = self.cast._lock
+        path = lock._path()
+        with lock:
+            self.assertTrue(os.path.exists(path))
+            with lock:                      # nested: no deadlock, same file
+                self.assertTrue(os.path.exists(path))
+            self.assertTrue(os.path.exists(path))
+        self.assertFalse(os.path.exists(path))
+
+    def test_stale_lock_is_broken(self):
+        import os
+        import time
+        path = self.cast._lock._path()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("crashed writer")
+        old = time.time() - 60
+        os.utime(path, (old, old))
+        t0 = time.time()
+        with self.cast._lock:
+            pass
+        self.assertLess(time.time() - t0, 2.0, "waited on a stale lock")
+        self.assertFalse(os.path.exists(path))
+
+
 if __name__ == "__main__":
     unittest.main()
