@@ -27,6 +27,12 @@ battlemap.json:
      "image": "maps/cellar.png" | null, "round": 1,
      "tokens": {"Havoc": {"x": 3, "y": 4, "kind": "pc", "speed": 30,
                           "moved": 0, "size": 1}}}
+    Optional (older files without them load with the defaults):
+      token "hidden": true      -- never sent to a screen until revealed (D10)
+      token "portrait": "maps/tokens/havoc.png"
+      "fog": {"trail": [[x,y]...], "show": [[x,y]...], "hide": [[x,y]...]}
+        trail = squares PCs have stood on or passed through (the TV dims
+        them as "seen earlier"); show / hide = the DM's manual overrides.
 """
 from __future__ import annotations
 
@@ -205,8 +211,11 @@ def token(m: dict, name: str) -> tuple:
     raise MapError(f"no token named {name!r} on the map (have: {', '.join(m['tokens']) or 'none'})")
 
 
+_PORTRAIT_RE = re.compile(r"[\w\-./ ]{1,120}")
+
+
 def place(m: dict, name: str, x: int, y: int, kind: str = "npc", speed: int = 30,
-          size: int = 1) -> dict:
+          size: int = 1, hidden: bool = False, portrait: str | None = None) -> dict:
     if cell(m, x, y) in BLOCKING:
         raise MapError(f"({x},{y}) is a wall, obstacle or off the map")
     occ = _occupied(m, "")
@@ -215,8 +224,102 @@ def place(m: dict, name: str, x: int, y: int, kind: str = "npc", speed: int = 30
     for n in list(m["tokens"]):
         if n.lower() == name.lower():
             del m["tokens"][n]
-    m["tokens"][name] = {"x": x, "y": y, "kind": kind, "speed": speed, "moved": 0, "size": size}
-    return m["tokens"][name]
+    if portrait is not None and (not _PORTRAIT_RE.fullmatch(portrait) or ".." in portrait
+                                 or not portrait.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))):
+        raise MapError(f"portrait {portrait!r} must be an image path inside the campaign's maps/ "
+                       "folder, e.g. maps/tokens/havoc.png")
+    t = {"x": x, "y": y, "kind": kind, "speed": speed, "moved": 0, "size": size}
+    if hidden:
+        t["hidden"] = True
+    if portrait:
+        t["portrait"] = portrait
+    m["tokens"][name] = t
+    if kind == "pc":
+        _add_trail(m, [(x, y)])
+    return t
+
+
+def set_hidden(m: dict, name: str, hidden: bool) -> dict:
+    """Hide a token from every screen (invisible, hiding, disguised) or
+    reveal it again. Claude still sees it in `map show`."""
+    _, t = token(m, name)
+    if hidden:
+        t["hidden"] = True
+    else:
+        t.pop("hidden", None)
+    return t
+
+
+# ── fog ──────────────────────────────────────────────────────────────────────
+
+FOG_MODES = ("reveal", "hide", "auto")
+
+
+def fog_of(m: dict) -> dict:
+    """The map's fog record, created empty for an older file."""
+    f = m.get("fog")
+    if not isinstance(f, dict):
+        f = m["fog"] = {}
+    for k in ("trail", "show", "hide"):
+        if not isinstance(f.get(k), list):
+            f[k] = []
+    return f
+
+
+def _add_trail(m: dict, squares) -> None:
+    f = fog_of(m)
+    have = {tuple(p) for p in f["trail"] if isinstance(p, (list, tuple)) and len(p) == 2}
+    cap = m["grid"]["w"] * m["grid"]["h"]
+    for x, y in squares:
+        if (x, y) not in have and len(f["trail"]) < cap:
+            have.add((x, y))
+            f["trail"].append([x, y])
+
+
+def set_fog(m: dict, mode: str, x1: int, y1: int, x2: int | None = None, y2: int | None = None) -> int:
+    """Manual fog over the rectangle (x1,y1)-(x2,y2): `reveal` shows it
+    whatever the PCs can see (scrying, a trapdoor), `hide` darkens it, `auto`
+    hands it back to line of sight. Returns the number of squares."""
+    if mode not in FOG_MODES:
+        raise MapError(f"fog mode is one of {', '.join(FOG_MODES)}, not {mode!r}")
+    x2 = x1 if x2 is None else x2
+    y2 = y1 if y2 is None else y2
+    g = m["grid"]
+    xs = range(max(0, min(x1, x2)), min(g["w"] - 1, max(x1, x2)) + 1)
+    ys = range(max(0, min(y1, y2)), min(g["h"] - 1, max(y1, y2)) + 1)
+    rect = {(x, y) for y in ys for x in xs}
+    if not rect:
+        raise MapError(f"({x1},{y1})-({x2},{y2}) is off the map")
+    f = fog_of(m)
+    for key in ("show", "hide"):
+        f[key] = [p for p in f[key] if tuple(p) not in rect]
+    if mode != "auto":
+        key = "show" if mode == "reveal" else "hide"
+        f[key].extend([x, y] for y in ys for x in xs)
+    return len(rect)
+
+
+def clear_fog(m: dict) -> None:
+    """`fog auto --all`: drop every manual override (the trail stays)."""
+    f = fog_of(m)
+    f["show"], f["hide"] = [], []
+
+
+def hp_state(cur, mx) -> str | None:
+    """A monster's rough health for the screens (D8): healthy above half,
+    bloodied down to a quarter, near_death at a quarter or less."""
+    try:
+        cur, mx = float(cur), float(mx)
+    except (TypeError, ValueError):
+        return None
+    if mx <= 0:
+        return None
+    frac = cur / mx
+    if frac > 0.5:
+        return "healthy"
+    if frac > 0.25:
+        return "bloodied"
+    return "near_death"
 
 
 def check_move(m: dict, name: str, x: int, y: int, dash: bool = False) -> dict:
@@ -308,6 +411,8 @@ def move(m: dict, name: str, x: int, y: int, dash: bool = False, force: bool = F
         path = [tuple(p) for p in r["path"]]
         t["moved"] = t.get("moved", 0) + cost
     t["x"], t["y"] = x, y
+    if t.get("kind") == "pc":
+        _add_trail(m, [(x, y)] if force else path)
     left = t.get("speed", 30) * (2 if dash else 1) - t.get("moved", 0)
     return {"name": n, "from": start, "to": (x, y), "cost": cost, "left": max(left, 0),
             "path": path}
@@ -368,20 +473,41 @@ def attack_range(m: dict, attacker: str, target: str, reach: int | None = None,
 # ── display ──────────────────────────────────────────────────────────────────
 
 def display_payload(m: dict, hp: dict | None = None, conditions: dict | None = None) -> dict:
-    """The /stats "map" payload: grid, cells, image, round and tokens."""
+    """The /stats "map" payload: grid, cells, image, round, fog and tokens.
+
+    Hidden tokens are left out entirely (D10). Monsters carry only a rough
+    `hp_state`, never their numbers (D8); a PC keeps `hp` only when set on
+    its token (the TV prefers the party's HP). `conditions` maps a name
+    (any case) to its condition list, e.g. from tracker.json."""
+    conds = {str(k).lower(): v for k, v in (conditions or {}).items()}
     toks = []
     for n, t in m["tokens"].items():
-        d = {"name": n, "x": t["x"], "y": t["y"], "kind": t.get("kind", "npc"),
-             "size": t.get("size", 1)}
-        if hp and n in hp:
-            d["hp"] = hp[n]
-        elif t.get("hp"):
-            d["hp"] = t["hp"]
-        if conditions and conditions.get(n):
-            d["conditions"] = conditions[n]
+        if t.get("hidden"):
+            continue
+        kind = t.get("kind", "npc")
+        d = {"name": n, "x": t["x"], "y": t["y"], "kind": kind, "size": t.get("size", 1)}
+        h = hp[n] if hp and n in hp else t.get("hp")
+        if h:
+            if kind == "pc":
+                d["hp"] = h
+            else:
+                try:
+                    st = hp_state(h[0], h[1])
+                except (TypeError, IndexError, KeyError):
+                    st = None
+                if st:
+                    d["hp_state"] = st
+        if t.get("portrait"):
+            d["portrait"] = t["portrait"]
+        c = conds.get(n.lower())
+        if c:
+            d["conditions"] = list(c)
         toks.append(d)
+    f = m.get("fog") if isinstance(m.get("fog"), dict) else {}
+    fog = {k: [list(p) for p in f.get(k, []) if isinstance(p, (list, tuple)) and len(p) == 2]
+           for k in ("trail", "show", "hide")}
     return {"grid": m["grid"], "cells": m["cells"], "image": m.get("image"),
-            "round": m.get("round", 1), "tokens": toks}
+            "round": m.get("round", 1), "fog": fog, "tokens": toks}
 
 
 def render_ascii(m: dict) -> str:
@@ -392,7 +518,8 @@ def render_ascii(m: dict) -> str:
         ch = n[0].upper() if t.get("kind") == "pc" else n[0].lower()
         if 0 <= t["y"] < len(grid) and 0 <= t["x"] < len(grid[t["y"]]):
             grid[t["y"]][t["x"]] = ch
-        legend.append(f"  {ch} {n} ({t['x']},{t['y']}) moved {t.get('moved', 0)}/{t.get('speed', 30)} ft")
+        legend.append(f"  {ch} {n} ({t['x']},{t['y']}) moved {t.get('moved', 0)}/{t.get('speed', 30)} ft"
+                      + (" (hidden)" if t.get("hidden") else ""))
     head = "   " + "".join(str(x % 10) for x in range(m["grid"]["w"]))
     rows = [f"{y:2d} " + "".join(r) for y, r in enumerate(grid)]
     return "\n".join([head] + rows + legend)

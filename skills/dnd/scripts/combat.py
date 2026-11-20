@@ -414,6 +414,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pc", action="store_true", help="a player character (default: NPC/monster)")
     s.add_argument("--speed", type=int, default=30)
     s.add_argument("--size", type=int, default=1, help="squares per side (Large = 2)")
+    s.add_argument("--hidden", action="store_true",
+                   help="placed hidden: on no screen until `reveal` (invisible, hiding, an ambush)")
+    s.add_argument("--portrait", metavar="PATH", help="token picture in the campaign's maps/ folder")
+    _camp(s)
+
+    s = sub.add_parser("hide", help="hide a token from every screen (invisible, hiding, disguised)")
+    s.add_argument("name")
+    _camp(s)
+
+    s = sub.add_parser("reveal", help="show a hidden token again")
+    s.add_argument("name")
+    _camp(s)
+
+    s = sub.add_parser("fog", help="manual fog: reveal | hide | auto a rectangle (auto --all clears every override)")
+    s.add_argument("mode", choices=["reveal", "hide", "auto"])
+    s.add_argument("coords", nargs="*", type=int, metavar="X1 Y1 [X2 Y2]")
+    s.add_argument("--all", action="store_true", help="with auto: drop every manual override")
     _camp(s)
 
     s = sub.add_parser("move", help="move a token, checking walls and speed")
@@ -488,10 +505,27 @@ def push_stats_json(payload: dict) -> None:
         pass
 
 
-def push_map(m: dict) -> None:
-    """Send the map to the display (silently nothing when it isn't running)."""
+def tracker_conditions(campaign_dir) -> dict:
+    """{name: [conditions]} from the campaign's tracker.json (empty if none)."""
+    try:
+        with open(pathlib.Path(campaign_dir) / "tracker.json", encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    if isinstance(state, dict):
+        for key, ent in state.items():
+            if isinstance(ent, dict) and isinstance(ent.get("conditions"), list) and ent["conditions"]:
+                out[str(ent.get("name") or key)] = [str(c) for c in ent["conditions"]]
+    return out
+
+
+def push_map(m: dict, campaign_dir=None) -> None:
+    """Send the map to the display (silently nothing when it isn't running).
+    Token conditions come from the campaign's tracker.json."""
     import battlemap
-    push_stats_json({"map": battlemap.display_payload(m)})
+    conds = tracker_conditions(campaign_dir) if campaign_dir else None
+    push_stats_json({"map": battlemap.display_payload(m, conditions=conds)})
 
 
 def _map_cmd(a) -> int:
@@ -529,9 +563,31 @@ def _map_cmd(a) -> int:
         else:
             m = bm.load(camp)
         if a.cmd == "place":
-            bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size)
+            bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size,
+                     hidden=a.hidden, portrait=a.portrait)
             bm.save(camp, m)
-            print(f"{a.name} placed at ({a.x},{a.y}).")
+            print(f"{a.name} placed at ({a.x},{a.y}){' — hidden' if a.hidden else ''}.")
+        elif a.cmd in ("hide", "reveal"):
+            n, _ = bm.token(m, a.name)
+            bm.set_hidden(m, n, a.cmd == "hide")
+            bm.save(camp, m)
+            print(f"{n} is hidden from the screens." if a.cmd == "hide" else f"{n} is revealed.")
+        elif a.cmd == "fog":
+            if a.all:
+                if a.mode != "auto" or a.coords:
+                    print("combat.py fog: --all goes with `auto` and no squares", file=sys.stderr)
+                    return 2
+                bm.clear_fog(m)
+                msg = "Manual fog cleared: line of sight decides everywhere."
+            else:
+                if len(a.coords) not in (2, 4):
+                    print("combat.py fog: give X1 Y1 or X1 Y1 X2 Y2 (or `auto --all`)", file=sys.stderr)
+                    return 2
+                n = bm.set_fog(m, a.mode, *a.coords)
+                what = {"reveal": "revealed", "hide": "hidden", "auto": "back to line of sight"}[a.mode]
+                msg = f"Fog: {n} square{'s' if n != 1 else ''} {what}."
+            bm.save(camp, m)
+            print(msg)
         elif a.cmd == "move" and a.check and a.force:
             print("combat.py move: --check tests a normal move; forced movement (--force) has no check",
                   file=sys.stderr)
@@ -577,7 +633,7 @@ def _map_cmd(a) -> int:
         if a.cmd == "map" and a.action in ("init", "show"):
             print(bm.render_ascii(m))
         if not getattr(a, "no_push", True):
-            push_map(m)
+            push_map(m, camp)
         return 0
     except bm.MapError as exc:
         print(f"combat.py {a.cmd}: {exc}", file=sys.stderr)
@@ -599,7 +655,7 @@ def _push_quietly(payload: dict) -> None:
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
 
-    if a.cmd in ("map", "place", "move", "turn", "dist", "remove", "hp"):
+    if a.cmd in ("map", "place", "move", "turn", "dist", "remove", "hp", "hide", "reveal", "fog"):
         return _map_cmd(a)
 
     if a.cmd == "init":

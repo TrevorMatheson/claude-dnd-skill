@@ -187,10 +187,15 @@ $C move Havoc 6 1 --check -c $CAMP         # dry run: OK, or the limit (feet lef
 $C hp "Giant Rat" 3/7 -c $CAMP             # monster HP ring (PCs use the party sidebar's HP)
 $C attack --atk 5 --ac 12 --dmg 1d6+3 --from Anony --target "Giant Rat" --range 80/320 -c $CAMP
 $C map show -c $CAMP                       # text view of the map and everyone's movement used
+$C hide "Goblin 2" -c $CAMP                # off every screen, even in plain sight (invisible, hiding, disguised); `place … --hidden` for an ambush
+$C reveal "Goblin 2" -c $CAMP              # back on the screens once the party notices it
+$C fog reveal 12 3 15 6 -c $CAMP           # manual fog over a rectangle: reveal | hide | auto (back to line of sight); `fog auto --all` drops every override
 $C end --clear-map -c $CAMP                # fight over: end combat and take the map off the TV
 ```
 
 **A player's move is checked before it is narrated.** When a player says where their character goes, run `move NAME X Y --check` first (add `--dash` if they dashed). If it fails, never narrate the move: tell that player the limit in one line from the result — e.g. "you have 30 ft left, and the wall blocks the direct route (it's 35 ft round by the door)" — and ask where they go instead. Only a move that passes the check is narrated and sent.
+
+**What the party sees.** The TV works out fog from every PC's line of sight through the layout's walls: unseen squares are dark, squares seen earlier stay dim, and a monster appears only once a PC could see it — so you never need to hide a monster just because it is round a corner. Use `hide` for what the party can't *notice* even in view (an invisible stalker, a rogue hiding behind cover, a disguised cultist), and `reveal` the moment they spot it. Use manual fog for what line of sight can't know: `fog reveal` for scrying, a crystal ball or a trapdoor opening onto a lit room; `fog hide` for magical darkness or a curtain; `fog auto` to hand the squares back. `map show` still lists hidden tokens, marked `(hidden)`.
 
 A layout is a text drawing, one character per 5-ft square, **at most 30×20** (30 squares wide, 20 tall — the whole map always shows on the TV; `map init` refuses anything bigger, so split a bigger battle into areas or simplify the drawing): `#` wall, `.` floor, `~` difficult terrain, `T` obstacle, `D` door, space = outside. Letters mark starting squares, bound by legend lines — **UPPERCASE = PC**, lowercase = monster: `H = Havoc`, `r = Giant Rat`. A background image goes in `<campaign-dir>/maps/`; draw the layout to match its grid.
 

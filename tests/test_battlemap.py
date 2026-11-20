@@ -124,7 +124,8 @@ class TestRules(unittest.TestCase):
         bm.set_hp(m, "Giant Rat", 3, 7)
         p = bm.display_payload(m)
         rat = [t for t in p["tokens"] if t["name"] == "Giant Rat"][0]
-        self.assertEqual(rat["hp"], [3, 7])
+        self.assertEqual(rat.get("hp_state"), "bloodied")
+        self.assertNotIn("hp", rat)
         self.assertEqual(p["grid"]["w"], 14)
 
 
@@ -218,7 +219,7 @@ class TestServerAndTurn(unittest.TestCase):
             self.assertEqual(self.send.send_turn(turn), 0)
         rat = [t for t in self.app._current_stats["map"]["tokens"] if t["name"] == "Giant Rat"][0]
         self.assertEqual((rat["x"], rat["y"]), (8, 1))
-        self.assertEqual(rat["hp"], [3, 7])
+        self.assertNotIn("hp", rat)            # AC3: no exact monster HP on screens
         self.assertEqual(bm.load(self.camp)["tokens"]["Giant Rat"]["x"], 8)
 
     def test_bad_move_sends_nothing(self):

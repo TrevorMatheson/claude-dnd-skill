@@ -1,0 +1,19 @@
+{
+ "grid": {"w": 14, "h": 6, "ft": 5},
+ "cells": [
+  "##############",
+  "#....#.......#",
+  "#....#..TT...#",
+  "#....D...~~..#",
+  "#....#...~~..#",
+  "##############"
+ ],
+ "image": null,
+ "round": 2,
+ "tokens": {
+  "Havoc": {"x": 1, "y": 1, "kind": "pc", "speed": 30, "moved": 0, "size": 1},
+  "Anony": {"x": 2, "y": 3, "kind": "pc", "speed": 30, "moved": 0, "size": 1},
+  "Giant Rat": {"x": 11, "y": 1, "kind": "npc", "speed": 30, "moved": 0, "size": 1, "hp": [5, 7]},
+  "Giant Rat 2": {"x": 12, "y": 4, "kind": "npc", "speed": 30, "moved": 0, "size": 1}
+ }
+}
