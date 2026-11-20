@@ -422,7 +422,7 @@ Default to `Step by step` if the question is dismissed. Either path lands in the
 4. Run `character.py calc --race <race> [--subrace <subrace>]` with the BASE ability array. **It applies the racial bonuses itself** and prints base / race / final, along with every secondary stat — do not add racial bonuses by hand first, and do not omit `--race`. An unknown race exits non-zero rather than applying nothing, so a typo cannot produce a sheet quietly missing its bonuses. `lookup.py race <name>` has the full entry (bonuses, traits, speed, languages) if the player wants to read it. **In a 2024 campaign the increase comes from the background instead:** run `character.py calc --background <acolyte|criminal|sage|soldier> --background-asi STR=2,CON=1` (or `+1/+1/+1`) and no `--race`; it checks the increase is one the background allows and prints base / background / final. Add `--armor <srd-armor-index> [--shield]` (or `--armor none`) for the Armor Class.
 5. Ask: Fighting Style (Fighter/Paladin/Ranger), spells (if caster)
 6. Assign starting equipment per class + background
-7. Write to `characters/<name>.md` using `templates/character-sheet.md`; set `## Campaign History → Origin campaign`
+7. Write to `characters/<name>.md` using `templates/character-sheet.md`; set `## Campaign History → Origin campaign`. Give the character its voice (no NPC ever gets it): `python ${CLAUDE_SKILL_DIR}/display/cast.py voices --free -c <campaign>`, pick the free voice that fits the character, and `python ${CLAUDE_SKILL_DIR}/display/cast.py set -c <campaign> --pc "<Name>" <voice>`.
 8. Add to `state.md` party line
 9. Mirror to global roster: `cp characters/<name>.md ~/.claude/dnd/characters/<name>.md`
 10. Run supplemental builder to fetch any non-SRD spells/features the character uses:
@@ -442,7 +442,7 @@ Read `characters/<name>.md`, display cleanly. If name omitted and one character 
 Bring a player's D&D Beyond character in, and catch sheet problems before the session rather than mid-fight.
 1. Run `python ${CLAUDE_SKILL_DIR}/scripts/ddb_import.py "<url>" --ruleset <campaign ruleset>`. It reads the character service's JSON, which answers only for characters whose sharing is **Public** (Character → Manage → Sharing). On exit 2, tell the player exactly that, or open the JSON URL it prints in the browser (signed in), save it as a `.json` file, and pass the file.
 2. Read every `!` line to the player with its `→` fix — unequipped armor (D&D Beyond shows AC 10), no spells prepared, Weapon Mastery for a weapon they don't carry, a 2014 background on a 2024 character, an unfinished sheet. Ask them to fix it on D&D Beyond and run the import again; don't silently "correct" their sheet.
-3. Write the character file from the summary through the normal `/dm:dnd character new` sheet format (`templates/character-sheet.md`), using `--json` output for the numbers. Note "Imported from D&D Beyond <id>" at the top.
+3. Write the character file from the summary through the normal `/dm:dnd character new` sheet format (`templates/character-sheet.md`), using `--json` output for the numbers. Note "Imported from D&D Beyond <id>" at the top. Then give it a voice: `python ${CLAUDE_SKILL_DIR}/display/cast.py voices --free -c <campaign>`, pick the free voice that fits the character, and `python ${CLAUDE_SKILL_DIR}/display/cast.py set -c <campaign> --pc "<Name>" <voice>`.
 Only fall back to reading the sheet page in the browser when neither the URL nor a saved file works.
 
 ---
@@ -451,7 +451,7 @@ Only fall back to reading the sheet page in the browser when neither the URL nor
 1. Find character sheet: `from:<campaign>` specified → that campaign's characters/; otherwise check global roster `~/.claude/dnd/characters/<name>.md`; if neither → search all campaigns, list matches, ask.
 2. Show summary (level, XP, HP, key inventory) and ask: *"Import at current level [X], or level up before starting?"*
    - As-is → copy directly; Level up first → run `/dm:dnd level up` on source sheet
-3. Copy to current campaign's `characters/<name>.md`. Update: Campaign, Last Updated, Previous campaigns, Death Saves (reset).
+3. Copy to current campaign's `characters/<name>.md`. Update: Campaign, Last Updated, Previous campaigns, Death Saves (reset). If its voice is missing or another character or an NPC in this campaign already has it, give it a new one: `python ${CLAUDE_SKILL_DIR}/display/cast.py voices --free -c <campaign>`, pick the free voice that fits the character, and `python ${CLAUDE_SKILL_DIR}/display/cast.py set -c <campaign> --pc "<Name>" <voice>`.
 4. Optionally ask about equipment adjustment for new setting.
 5. Add to `state.md` party line. Update global roster.
 6. Run supplemental builder for any non-SRD entries:

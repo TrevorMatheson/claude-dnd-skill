@@ -566,6 +566,30 @@ def _set_pc(campaign, name: str, voice: str) -> None:
     _reassign_npcs_holding(campaign, voice)
 
 
+def pc_voice(campaign, name: str) -> str:
+    """The player character's voice, given one first when its sheet has none
+    (D22): a single Kokoro voice nobody else holds (not the narrator's, not
+    another character's, not part of any NPC's voice), written under
+    `## Identity`. "" when there is no character file by that name."""
+    with _lock:
+        path = _pc_path(campaign, name)
+        if path is None:
+            return ""
+        info = _pc_info(path)
+        if info and info["voice"] in tts.KOKORO_VOICES:
+            return info["voice"]
+        lines, _, _ = _npc_lines(campaign)
+        npc_parts = [p for s in _npc_sections(lines) for p in parts_of(s["voice"])]
+        others = {p["voice"] for p in _pcs(campaign) if p["path"] != path}
+        blocked = {narrator_voice(campaign), heard_narrator(campaign)} | others
+        allowed = [v for v in kokoro_voices() if v not in blocked]
+        if not allowed:
+            return ""
+        voice = min(allowed, key=lambda v: (npc_parts.count(v), allowed.index(v)))
+        _set_pc(campaign, info["name"] if info else name, voice)
+        return voice
+
+
 def _set_narrator(campaign, voice: str) -> None:
     if not tts.valid_voice(voice) or tts.blend_parts(voice):
         raise ValueError(f"{voice!r} is not a narrator voice")

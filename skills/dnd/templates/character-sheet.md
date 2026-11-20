@@ -4,6 +4,7 @@
 ## Identity
 - **Race:** | **Class:** | **Level:** | **Background:**
 - **Alignment:** | **XP:** / <next level threshold>
+- **Voice:** <a free Kokoro voice that fits this character — `cast.py voices --free -c <campaign>`, then `cast.py set -c <campaign> --pc "<Name>" <voice>`>
 
 ## Character Pillar
 - **Player's sentence:** *"<the raw one-sentence answer to "what should the DM know about you?">"*

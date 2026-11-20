@@ -415,6 +415,44 @@ def _staged_snapshot() -> dict:
     return {k: {"text": v["text"], "ready": v["ready"]} for k, v in _staged.items()}
 
 
+# What each character last said through Talk (/stt): {name lower: (text, time)}.
+# A typed action that contains it was spoken at the table, so it is not read
+# back (D22).
+_stt_said: dict = {}
+_stt_said_lock = threading.Lock()
+_STT_SAID_FOR = 600.0      # seconds a transcript keeps its action from being read
+
+
+def _read_actions_aloud(inputs) -> None:
+    """With "Read player actions aloud" on, send the TV each typed action with
+    the character's voice, before the DM responds (D22, AC18)."""
+    try:
+        if not _display_config().get("voice", {}).get("read_player_actions"):
+            return
+    except Exception:
+        return
+    name = _active_campaign_name()
+    now = _time.time()
+    reads = []
+    for character, text in inputs:
+        text = str(text or "").strip()
+        if not text or character == "Everybody":
+            continue
+        with _stt_said_lock:
+            said = _stt_said.get(str(character).lower())
+        if said and now - said[1] <= _STT_SAID_FOR and said[0].lower() in text.lower():
+            continue
+        voice = ""
+        if _cast is not None and name:
+            try:
+                voice = _cast.pc_voice(name, character)
+            except (OSError, ValueError) as exc:
+                print(f"[cast] no voice for {character!r}: {exc}", flush=True)
+        reads.append({"character": character, "text": text, "voice": voice})
+    if reads:
+        _broadcast({"read_actions": reads})
+
+
 def _check_auto_trigger() -> None:
     """Move staged-and-ready actions into the DM-gated queue file (.input_queue).
 
@@ -450,6 +488,7 @@ def _check_auto_trigger() -> None:
         char_names = []
     if char_names:
         _rewind_mark(inputs)
+        _read_actions_aloud(inputs)
 
     if char_names:
         with _queue_status_lock:
@@ -2752,6 +2791,9 @@ def cast_get():
     if _cast is None or not name:
         return jsonify(narrator=_read_narrator_voice(), pcs=[], npcs=[], voices=[])
     try:
+        for pc in _cast.cast_list(name)["pcs"]:
+            if not pc["voice"]:
+                _cast.pc_voice(name, pc["name"])       # D22: every PC has a voice
         data = _cast.cast_list(name)
     except (OSError, ValueError) as exc:
         return jsonify(error=str(exc)), 500
@@ -3440,7 +3482,11 @@ def stt_transcribe():
             return jsonify({"error": str(e)}), 503
         except Exception as e:
             return jsonify({"error": f"couldn't understand that recording ({type(e).__name__})"}), 422
-        return jsonify({"text": _sanitize_input(text)}), 200
+        said = _sanitize_input(text)
+        if said.strip():
+            with _stt_said_lock:
+                _stt_said[character.lower()] = (said.strip(), _time.time())
+        return jsonify({"text": said}), 200
     finally:
         if _mic_release(character):
             _broadcast({"mic": _mic_payload()})
