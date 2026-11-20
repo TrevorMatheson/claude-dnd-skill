@@ -55,6 +55,10 @@ class TestNpcVoices(unittest.TestCase):
         (cls.camp / "state.md").write_text("## Session Flags\ntutor_voice: Zephyr\n", encoding="utf-8")
 
     def setUp(self):
+        # npcs.md is written to by voice assignment and migration (S11), so
+        # each test starts from the same file.
+        (self.camp / "npcs.md").write_text(NPCS, encoding="utf-8")
+        getattr(self.app, "_npc_voice_cache", {}).clear()
         self.sent = []
         self._p = [mock.patch.object(self.app, "_broadcast", side_effect=self.sent.append),
                    mock.patch.object(self.app, "_active_campaign_name", return_value="voices-test")]
@@ -69,12 +73,26 @@ class TestNpcVoices(unittest.TestCase):
         self.client.post("/chunk", json=body)
         return [b for b in self.sent if b.get("text")][-1]
 
+    # Rewritten for display foundation D17/D19/D21 (plan S11, user-approved):
+    # with the default Kokoro-only NPC engine an NPC block carries the NPC's
+    # own Kokoro voice. A Gemini-named Voice: line is migrated to its old
+    # stand-in (free here) and the Gemini name kept on a `Gemini voice:` line.
     def test_npc_voice_from_npcs_md(self):
-        self.assertEqual(self._chunk(npc="Mira Ashgrove", text="Welcome.").get("voice"), "Kore")
-        self.assertEqual(self._chunk(npc="brother hale", text="Peace.").get("voice"), "Charon")
+        self.assertEqual(self._chunk(npc="Mira Ashgrove", text="Welcome.").get("voice"), "af_kore")
+        self.assertEqual(self._chunk(npc="brother hale", text="Peace.").get("voice"), "bm_george")
+        text = (self.camp / "npcs.md").read_text(encoding="utf-8")
+        self.assertIn("**Gemini voice:** Kore", text)
+        self.assertIn("**Gemini voice:** Charon", text)
 
+    # D19: an NPC with only a placeholder is given its own voice, written back,
+    # never the narrator's.
     def test_placeholder_voice_ignored(self):
-        self.assertNotIn("voice", self._chunk(npc="Old Tam", text="Eh?"))
+        v = self._chunk(npc="Old Tam", text="Eh?").get("voice")
+        self.assertTrue(self.app._tts.is_kokoro(v), f"Old Tam got {v!r}, not a Kokoro voice")
+        self.assertNotIn(v, {self.app._read_narrator_voice(), "bm_lewis"})
+        text = (self.camp / "npcs.md").read_text(encoding="utf-8")
+        self.assertIn(f"- **Voice:** {v}", text)
+        self.assertNotIn("<read-aloud voice", text)
 
     def test_explicit_voice_wins(self):
         self.assertEqual(self._chunk(npc="Mira Ashgrove", text="Hm.", voice="Aoede")["voice"], "Aoede")
@@ -85,8 +103,12 @@ class TestNpcVoices(unittest.TestCase):
     def test_narration_keeps_narrator(self):
         self.assertNotIn("voice", self._chunk(text="The rain falls."))
 
+    # D19 (plan S11): an invalid explicit voice is dropped; the NPC then gets
+    # its own voice from the cast instead of none.
     def test_invalid_voice_dropped(self):
-        self.assertNotIn("voice", self._chunk(npc="Nobody", text="Hi.", voice="Robot"))
+        v = self._chunk(npc="Nobody", text="Hi.", voice="Robot").get("voice")
+        self.assertNotEqual(v, "Robot")
+        self.assertTrue(self.app._tts.is_kokoro(v), f"Nobody got {v!r}, not a Kokoro voice")
 
 
 class TestPageWiring(unittest.TestCase):

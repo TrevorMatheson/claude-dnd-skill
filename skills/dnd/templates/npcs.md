@@ -11,7 +11,7 @@
 - **HP:** | **AC:** | **Attack:** | **Notable abilities:**
 - **Demeanor:** | **Motivation:** | **Secret:**
 - **Speech quirk:**
-- **Voice:** <read-aloud voice — Male: Charon, Enceladus, Fenrir, Umbriel · Female: Aoede, Gacrux, Kore, Vindemiatrix, Zephyr. Pick one the narrator is not using>
+- **Voice:** <a free Kokoro voice that fits this NPC — list them with `cast.py voices --free -c <campaign>`, set it with `cast.py set -c <campaign> --npc "<Name>" <voice>`. Never the narrator's or a player character's.>
 - **Attitude toward party:** neutral (scale: hostile → unfriendly → neutral → friendly → allied)
 - **Faction:** <faction name or "independent">
 - **Current goal:** <what this NPC is actively doing or trying to achieve right now — update each session>

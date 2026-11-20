@@ -40,7 +40,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 8. **Three Truths** — one settlement, one nearby threat, one mystery (with clue trail). Write to respective sections in world.md.
 9. **Threat Escalation Arc** — fill the five-stage table in world.md immediately after threat generation. Set current stage to 1. Write `Threat arc stage: 1 — Now` to `state.md → ## World State`.
 10. **2 Factions** — archetype, all fields including current activity. Write to `## Factions` in world.md. Write one-line faction states to `state.md → ## World State`.
-11. **3 NPCs with relationship web** — full entries (role, stats, demeanor, motivation, secret, speech quirk, faction, current goal, schedule, personality axes). Generate all three first, then fill Relationships (every NPC needs ≥2 links to others). Update index table.
+11. **3 NPCs with relationship web** — full entries (role, stats, demeanor, motivation, secret, speech quirk, faction, current goal, schedule, personality axes). Generate all three first, then fill Relationships (every NPC needs ≥2 links to others). Update index table. Give each NPC its own voice (see `/dm:dnd npc` → **Voice**).
 12. **3–5 Quest Seeds** from threat, factions, mystery, NPC motivations. Write to `## Quest Seed Bank` in world.md.
 13. **Dynamic Campaign Arc** — auto-generate the arc from all world data just created. Use Opus for this step. Ask: *"Generate a committed narrative arc? [y/n — recommended]"*
 
@@ -492,6 +492,8 @@ Only fall back to reading the sheet page in the browser when neither the URL nor
 ## `/dm:dnd npc [name]`
 - Existing → read full entry from npcs-full.md (search by name), portray in character with voice/quirk
 - New → generate full entry: role, CR-appropriate stats, demeanor, motivation, secret, speech quirk, faction (or "independent"), current goal, schedule, all four personality axes, ≥2 relationships to existing NPCs. Default attitude neutral. Append full entry to npcs-full.md; add one-line summary row to npcs.md index.
+
+  **Voice (every NPC has its own):** run `python ${CLAUDE_SKILL_DIR}/display/cast.py voices --free -c <campaign>`, pick the free voice that best fits the NPC (accent, sex, age, temperament), and write it with `python ${CLAUDE_SKILL_DIR}/display/cast.py set -c <campaign> --npc "<Name>" <voice>`. It refuses the narrator's voice, any player character's and any voice another NPC holds. If an NPC speaks before it has a voice, the display gives it the next free one and writes it to npcs.md; change it the same way if it doesn't fit.
 
   **Name uniqueness check (added 2026-05-07):** before generating, run `python3 ${CLAUDE_SKILL_DIR}/scripts/name_registry.py check "<proposed-name>"`. If duplicate (exit 1), surface the prior use to the DM and offer either: (a) proceed with the duplicate (some scenarios want recurring names — a Voss reference can be deliberate); or (b) regenerate with a different name. Whichever path is chosen, after the NPC is added to npcs.md / npcs-full.md, call `name_registry.py add --name "<name>" --type npc --campaign <name> --session <current>` to record the entry.
 

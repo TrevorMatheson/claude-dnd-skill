@@ -85,6 +85,10 @@ try:
     import tts as _tts
 except Exception:
     _tts = None   # type: ignore
+try:
+    import cast as _cast     # who speaks in which voice (npcs.md, characters/)
+except Exception:
+    _cast = None   # type: ignore
 
 # Undo the last turn (snapshots taken when player actions reach the DM).
 try:
@@ -1416,6 +1420,12 @@ def _display_config() -> dict:
         return copy.deepcopy(_display_cache["config"])
 
 
+def _display_reload() -> None:
+    """Forget the cached display settings (display.json changed on disk)."""
+    with _display_lock:
+        _display_cache["config"] = None
+
+
 def _combat_on(turn_order) -> bool:
     """Combat is on only while the turn order names someone. A bare
     {"current": …} or {"order": []} is not a fight to show."""
@@ -2270,35 +2280,19 @@ def _active_campaign_name() -> Optional[str]:
 
 _NPC_VOICE_PAT = re.compile(r"^\s*-?\s*\**voice:?\**:?\s*\**\s*([A-Za-z_]+)", re.IGNORECASE | re.MULTILINE)
 _TUTOR_VOICE_PAT = re.compile(r"^\s*tutor_voice:\s*([A-Za-z_]+)\s*$", re.MULTILINE)
-_npc_voice_cache: dict = {}   # (campaign, mtime) -> {npc name lower: voice}
-
-
-def _npc_voices(campaign: str) -> dict:
-    """{npc name (lower case): voice} from the campaign's npcs.md.
-
-    An NPC's section is a `### Name` heading; its voice is a line such as
-    `- **Voice:** Kore` inside that section. Cached on the file's mtime."""
+def _npc_voices(campaign: str, npc: str) -> str:
+    """The NPC's own Kokoro voice from npcs.md. An NPC that speaks with no
+    voice is given a free one, written back to npcs.md (D19); an old
+    Gemini-named Voice: line is migrated (D21). Never the narrator's or a
+    player character's voice."""
+    if _cast is None or not str(npc or "").strip():
+        return ""
     try:
-        path = _find_campaign(campaign) / "npcs.md"
-        mtime = path.stat().st_mtime
-    except (OSError, ValueError, TypeError):
-        return {}
-    key = (campaign, mtime)
-    if key in _npc_voice_cache:
-        return _npc_voice_cache[key]
-    voices: dict = {}
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {}
-    for sec in re.split(r"^###\s+", text, flags=re.MULTILINE)[1:]:
-        name, _, body = sec.partition("\n")
-        m = _NPC_VOICE_PAT.search(body)
-        if m and _tts is not None and _valid_voice(m.group(1)):
-            voices[name.strip().lower()] = m.group(1)
-    _npc_voice_cache.clear()
-    _npc_voice_cache[key] = voices
-    return voices
+        engine = _display_config().get("voice", {}).get("npc_engine", "kokoro")
+        return _cast.npc_voices(campaign, npc, engine=engine).get("voice", "")
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"[cast] could not resolve a voice for {npc!r}: {exc}", flush=True)
+        return ""
 
 
 def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
@@ -2312,7 +2306,7 @@ def _block_voice(data: dict, is_npc: bool, is_tutor: bool) -> str:
     if not name:
         return ""
     if is_npc:
-        return _npc_voices(name).get(str(data.get("npc", "")).strip().lower(), "")
+        return _npc_voices(name, str(data.get("npc", "")))
     if is_tutor:
         try:
             st = (_find_campaign(name) / "state.md").read_text(encoding="utf-8", errors="replace")
@@ -2478,15 +2472,23 @@ def _read_narrator_voice() -> str:
     name = _active_campaign_name()
     if not name:
         return default
-    try:
-        state = _find_campaign(name) / "state.md"
-        if not state.exists():
+    v = ""
+    if _cast is not None:
+        # display.json voice.narrator, then state.md tts_voice (D17, S11).
+        try:
+            v = _cast.narrator_voice(name, default="") or ""
+        except (OSError, ValueError, TypeError):
+            v = ""
+    else:
+        try:
+            state = _find_campaign(name) / "state.md"
+            if not state.exists():
+                return default
+            text = state.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
             return default
-        text = state.read_text(encoding="utf-8", errors="replace")
-    except (OSError, ValueError):
-        return default
-    m = _VOICE_PAT.search(text)
-    v = m.group(1).strip() if m else ""
+        m = _VOICE_PAT.search(text)
+        v = m.group(1).strip() if m else ""
     # Kokoro reads the narration when it's installed: a saved Gemini narrator
     # is from before that, so it gives way to the local default (Lewis).
     if local:
@@ -2677,7 +2679,57 @@ def tts_voice():
     if not _valid_voice(voice):
         return jsonify({"error": "invalid voice"}), 400
     ok = _write_narrator_voice(voice)
+    name = _active_campaign_name()
+    if _cast is not None and name:
+        # display.json is where the narrator is read from first; an NPC that
+        # held this voice is given another (no NPC sounds like the narrator).
+        try:
+            _cast.set_voice(name, "narrator", None, voice)
+            ok = True
+        except (OSError, ValueError) as exc:
+            print(f"[cast] narrator voice not saved to display.json: {exc}", flush=True)
+        _display_reload()
     return jsonify({"voice": voice, "persisted": ok}), 200
+
+
+@app.route("/cast", methods=["GET"])
+def cast_get():
+    """Everyone and their voice, for the laptop page's cast list (D18)."""
+    name = _active_campaign_name()
+    if _cast is None or not name:
+        return jsonify(narrator=_read_narrator_voice(), pcs=[], npcs=[], voices=[])
+    try:
+        data = _cast.cast_list(name)
+    except (OSError, ValueError) as exc:
+        return jsonify(error=str(exc)), 500
+    data["voices"] = [{"id": v, "label": _tts.KOKORO_VOICES[v], "kind": _cast.describe(v)}
+                      for v in _cast.kokoro_voices()] if _tts is not None else []
+    return jsonify(data)
+
+
+@app.route("/cast", methods=["POST"])
+def cast_post():
+    """Change one voice: {"kind": "npc"|"pc"|"narrator", "name", "voice"}."""
+    if not _host_only():
+        return jsonify(error="Open this on the computer running the game."), 403
+    name = _active_campaign_name()
+    if _cast is None or not name:
+        return jsonify(error="No campaign is loaded."), 409
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Send {kind, name, voice} as JSON."), 400
+    kind = str(data.get("kind") or "")
+    voice = str(data.get("voice") or "").strip()
+    try:
+        _cast.set_voice(name, kind, data.get("name"), voice)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except OSError as exc:
+        return jsonify(error=f"Could not save: {exc}"), 500
+    if kind == "narrator":
+        _write_narrator_voice(voice)
+        _display_reload()
+    return jsonify(_cast.cast_list(name))
 
 
 @app.route("/audio/sfx/<name>")
