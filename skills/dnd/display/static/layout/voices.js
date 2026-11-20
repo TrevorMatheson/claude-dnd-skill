@@ -48,10 +48,15 @@
     const $ = (id) => section.querySelector('#' + id);
     let cast = null, voice = null, busy = 0, drawn = '';
 
+    // The page's status line is at the top, far above the cast list, so the
+    // section repeats each message beside its own controls.
+    const near = section.querySelector('#lp-cast-status');
     function say(text, kind) {
-      if (!status) return;
-      status.textContent = text;
-      status.dataset.kind = kind || '';
+      for (const el of [status, near]) {
+        if (!el) continue;
+        el.textContent = text;
+        el.dataset.kind = kind || '';
+      }
     }
 
     function post(url, body) {

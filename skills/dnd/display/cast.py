@@ -595,6 +595,9 @@ def pc_voice(campaign, name: str) -> str:
 def _set_narrator(campaign, voice: str) -> None:
     if not tts.valid_voice(voice) or tts.blend_parts(voice):
         raise ValueError(f"{voice!r} is not a narrator voice")
+    if voice in pc_voices(campaign):
+        # D22: a read-aloud action must not sound like the DM.
+        raise ValueError(f"{voice} belongs to a player character")
     folder = _camp(campaign)
     with _lock:
         cfg = display_config.load(folder)

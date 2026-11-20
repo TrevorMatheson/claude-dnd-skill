@@ -2782,17 +2782,20 @@ def tts_voice():
     voice = (data.get("voice") or "").strip()
     if not _valid_voice(voice):
         return jsonify({"error": "invalid voice"}), 400
-    ok = _write_narrator_voice(voice)
     name = _active_campaign_name()
+    saved = False
     if _cast is not None and name:
         # display.json is where the narrator is read from first; an NPC that
         # held this voice is given another (no NPC sounds like the narrator).
         try:
             _cast.set_voice(name, "narrator", None, voice)
-            ok = True
-        except (OSError, ValueError) as exc:
+            saved = True
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except OSError as exc:
             print(f"[cast] narrator voice not saved to display.json: {exc}", flush=True)
         _display_reload()
+    ok = _write_narrator_voice(voice) or saved
     return jsonify({"voice": voice, "persisted": ok}), 200
 
 
