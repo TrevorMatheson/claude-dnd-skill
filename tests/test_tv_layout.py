@@ -32,7 +32,29 @@ turn order :7040-7062 (order, current, round), world clock :9051-9065
 (world_time {date, time, season, day_name, weather}) and timed effects
 players[].effects [{name, duration_type, ...}] :6336-6346.
 
-S8 (combat modes) is not tested here. Skipped when node is not installed.
+S8 (combat modes, plan step S8; AC7, AC8, AC9, AC13, D9-D11) is tested in
+the classes at the bottom, against this assumed contract:
+
+  layout.js  resolve(config, stats, override) -> {mode, left, right}
+               mode  'combat-map'   combat is on and stats.map is set
+                     'combat-nomap' combat is on and there is no map
+                     else 'story' / 'minimal' as in S7
+               combat is on when override === true, or when override is not
+               false and stats.turn_order.order is a list naming >= 1
+               combatant (same rule as the server's _combat_on, S4)
+               left / right  always the saved panels, in combat modes too,
+                             so the page can restore them
+  panels.js  turnBarView(stats) -> {round, items:[{name, current, foe}]} | null
+               foe   the name is not one of stats.players (case-insensitive)
+               null  when there is no turn order naming anyone
+  map.js     canvasSize(cssW, cssH, cols, rows, dpr) -> {width, height, cell}
+               cell    CSS px per grid square, as the old _bmRender's cs:
+                       max(8, floor(min(cssW / cols, cssH / rows)))
+               width   canvas backing pixels = round(cols * cell * dpr)
+               height  canvas backing pixels = round(rows * cell * dpr)
+               dpr     missing, 0 or not a number counts as 1
+
+Skipped when node is not installed.
 """
 from __future__ import annotations
 
@@ -49,6 +71,7 @@ DISPLAY = ROOT / "skills" / "dnd" / "display"
 TV_STATIC = DISPLAY / "static" / "tv"
 LAYOUT_JS = TV_STATIC / "layout.js"
 PANELS_JS = TV_STATIC / "panels.js"
+MAP_JS = TV_STATIC / "map.js"
 NODE = shutil.which("node")
 
 
@@ -62,7 +85,7 @@ def _load_display_config():
 
 _PRELUDE = """
 globalThis.window = globalThis.window || { TV: {} };
-const FILES = { layout: %(layout)s, panels: %(panels)s };
+const FILES = { layout: %(layout)s, panels: %(panels)s, map: %(map)s };
 function need(key, name) {
   const mod = require(FILES[key]);
   if (!mod || typeof mod[name] !== 'function') {
@@ -75,6 +98,8 @@ const partyView = (...a) => need('panels', 'partyView')(...a);
 const turnsView = (...a) => need('panels', 'turnsView')(...a);
 const questsView = (...a) => need('panels', 'questsView')(...a);
 const clockView = (...a) => need('panels', 'clockView')(...a);
+const turnBarView = (...a) => need('panels', 'turnBarView')(...a);
+const canvasSize = (...a) => need('map', 'canvasSize')(...a);
 const out = (v) => console.log(JSON.stringify(v));
 // A config as /display-config and the `display` event carry it.
 const cfg = (layout) => ({ version: 1, layout: layout,
@@ -91,7 +116,8 @@ class _NodeCase(unittest.TestCase):
         if missing:
             self.fail("not built yet: static/tv/" + ", static/tv/".join(missing))
         script = _PRELUDE % {"layout": json.dumps(str(LAYOUT_JS)),
-                             "panels": json.dumps(str(PANELS_JS))} + body
+                             "panels": json.dumps(str(PANELS_JS)),
+                             "map": json.dumps(str(MAP_JS))} + body
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
             f.write(script)
             path = f.name
@@ -348,6 +374,199 @@ class TestClockView(_NodeCase):
     def test_empty_stats(self):
         res = self.run_js("const v = clockView({}); out({date: v.date || '', time: v.time || '', effects: v.effects});")
         self.assertEqual(res, {"date": "", "time": "", "effects": []})
+
+
+# ── S8: combat modes in resolve() (AC7, D9, D10, D11) ────────────────────
+
+# A battle map as the server stores it (_clean_map output).
+MAP = {"grid": {"w": 12, "h": 8, "ft": 5},
+       "cells": ["#" * 12] + ["#" + "." * 10 + "#"] * 6 + ["#" * 12],
+       "image": None, "round": 1,
+       "tokens": [{"name": "Bram", "x": 2, "y": 3, "kind": "pc", "size": 1},
+                  {"name": "Goblin 1", "x": 8, "y": 4, "kind": "npc", "size": 1}]}
+TURNS = {"order": ["Bram", "Goblin 1", "Ysolde"], "current": "Bram", "round": 1}
+STORY = {"preset": "story", "left": ["party"], "right": ["quests", "clock"]}
+TACTICAL = {"preset": "tactical", "left": ["party"], "right": ["turns", "map"]}
+MINIMAL = {"preset": "minimal", "left": [], "right": []}
+STORY_RES = {"mode": "story", "left": ["party"], "right": ["quests", "clock"]}
+
+
+class _CombatCase(_NodeCase):
+
+    def resolve(self, layout, stats, override="null"):
+        return self.run_js("out(resolve(cfg(%s), %s, %s));"
+                           % (json.dumps(layout), json.dumps(stats), override))
+
+
+class TestResolveCombatAuto(_CombatCase):
+
+    # AC7 / D10 — a turn order naming someone plus a map is combat with the map.
+    def test_turn_order_with_map_is_combat_map(self):
+        res = self.resolve(STORY, {"turn_order": TURNS, "map": MAP})
+        self.assertEqual(res["mode"], "combat-map")
+
+    # AC7 / D11 — a turn order with no map is combat without one.
+    def test_turn_order_without_map_is_combat_nomap(self):
+        for stats in ({"turn_order": TURNS}, {"turn_order": TURNS, "map": None}):
+            with self.subTest(stats=stats):
+                self.assertEqual(self.resolve(STORY, stats)["mode"], "combat-nomap")
+
+    # D9 — combat replaces whichever layout is saved, Tactical and Minimal too.
+    def test_combat_from_any_saved_layout(self):
+        for layout in (TACTICAL, MINIMAL):
+            with self.subTest(layout=layout["preset"]):
+                self.assertEqual(self.resolve(layout, {"turn_order": TURNS, "map": MAP})["mode"], "combat-map")
+                self.assertEqual(self.resolve(layout, {"turn_order": TURNS})["mode"], "combat-nomap")
+
+    # A single combatant is still a fight.
+    def test_one_combatant_is_combat(self):
+        res = self.resolve(STORY, {"turn_order": {"order": ["Ogre"], "current": "Ogre"}})
+        self.assertEqual(res["mode"], "combat-nomap")
+
+    # Override null and override left out both mean automatic.
+    def test_undefined_override_is_automatic(self):
+        res = self.run_js("out(resolve(cfg(%s), %s));"
+                          % (json.dumps(STORY), json.dumps({"turn_order": TURNS, "map": MAP})))
+        self.assertEqual(res["mode"], "combat-map")
+
+    # D10 / D11 — the saved panels come back in combat modes too, unchanged,
+    # so the page can restore them when the fight ends.
+    def test_combat_keeps_saved_panels(self):
+        res = self.resolve(TACTICAL, {"turn_order": TURNS, "map": MAP})
+        self.assertEqual((res["left"], res["right"]), (["party"], ["turns", "map"]))
+        res = self.resolve(STORY, {"turn_order": TURNS})
+        self.assertEqual((res["left"], res["right"]), (["party"], ["quests", "clock"]))
+
+
+class TestResolveNotCombat(_CombatCase):
+
+    # S4 _combat_on — a bare {"current": ...} or an empty order is not a fight.
+    def test_turn_order_naming_nobody_is_not_combat(self):
+        for to in ({"current": "Bram"}, {"order": []}, {"order": [], "current": "Bram", "round": 2},
+                   {"order": "Bram, Goblin"}, {}, "Bram"):
+            with self.subTest(turn_order=to):
+                self.assertEqual(self.resolve(STORY, {"turn_order": to, "map": MAP}), STORY_RES)
+
+    # S4 — the TV agrees with the server's _combat_on on every shape.
+    def test_matches_server_combat_on(self):
+        spec = importlib.util.spec_from_file_location("dnd_display_app_tv_layout",
+                                                      str(DISPLAY / "dnd-display-app.py"))
+        app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(app)
+        shapes = [None, {}, {"current": "Bram"}, {"order": []}, {"order": ["Bram"]},
+                  {"order": "Bram"}, TURNS, [], "x"]
+        res = self.run_js("out(%s.map(t => resolve(cfg(%s), {turn_order: t}, null).mode));"
+                          % (json.dumps(shapes), json.dumps(STORY)))
+        expected = ["combat-nomap" if app._combat_on(t) else "story" for t in shapes]
+        self.assertEqual(res, expected)
+
+    # D9 — a map with no turn order is not combat (it shows in its panel).
+    def test_map_alone_is_not_combat(self):
+        res = self.resolve(TACTICAL, {"map": MAP, "turn_order": None})
+        self.assertEqual(res, {"mode": "story", "left": ["party"], "right": ["turns", "map"]})
+
+    # AC7 / D9 — a cleared turn order (combat.py end, --turn-clear) goes back
+    # to the saved layout: story, or minimal when that is what is saved.
+    def test_cleared_turn_order_restores_saved_layout(self):
+        res = self.run_js("""
+const c = cfg(%s), m = cfg(%s);
+const fight = {turn_order: %s, map: %s};
+const after = {turn_order: null, map: null};
+out([resolve(c, fight, null).mode, resolve(c, after, null), resolve(m, fight, null).mode, resolve(m, after, null)]);
+""" % (json.dumps(STORY), json.dumps(MINIMAL), json.dumps(TURNS), json.dumps(MAP)))
+        self.assertEqual(res, ["combat-map", STORY_RES,
+                               "combat-map", {"mode": "minimal", "left": [], "right": []}])
+
+
+class TestResolveOverride(_CombatCase):
+
+    # AC7 "the manual override works both ways" — false forces the saved
+    # layout even while a turn order is set.
+    def test_override_false_beats_turn_order(self):
+        self.assertEqual(self.resolve(STORY, {"turn_order": TURNS, "map": MAP}, "false"), STORY_RES)
+        self.assertEqual(self.resolve(MINIMAL, {"turn_order": TURNS}, "false"),
+                         {"mode": "minimal", "left": [], "right": []})
+
+    # AC7 — true forces combat with no turn order: with the map if there is one.
+    def test_override_true_without_turn_order(self):
+        self.assertEqual(self.resolve(STORY, {"map": MAP}, "true")["mode"], "combat-map")
+        self.assertEqual(self.resolve(STORY, {}, "true")["mode"], "combat-nomap")
+        self.assertEqual(self.resolve(STORY, {"turn_order": None, "map": None}, "true")["mode"], "combat-nomap")
+        self.assertEqual(self.resolve(MINIMAL, {"turn_order": {"order": []}}, "true")["mode"], "combat-nomap")
+
+    # AC7 — true with a turn order is combat as usual.
+    def test_override_true_with_turn_order(self):
+        self.assertEqual(self.resolve(STORY, {"turn_order": TURNS, "map": MAP}, "true")["mode"], "combat-map")
+
+    # The override keeps the saved panels too.
+    def test_override_true_keeps_saved_panels(self):
+        res = self.resolve(TACTICAL, {}, "true")
+        self.assertEqual((res["left"], res["right"]), (["party"], ["turns", "map"]))
+
+
+# ── S8: the combat turn bar (D10 "turn order as a slim bar") ─────────────
+
+class TestTurnBarView(_NodeCase):
+    NEEDS = (PANELS_JS,)
+
+    # D10 — the round, a token per combatant in order, the current one
+    # marked, and foes (anyone not in the party) told apart from players.
+    def test_round_order_current_and_foes(self):
+        stats = {"players": [{"name": "Bram"}, {"name": "Ysolde"}],
+                 "turn_order": {"order": ["Ysolde", "Goblin 1", "bram"], "current": "Goblin 1", "round": 3}}
+        res = self.run_js("out(turnBarView(%s));" % json.dumps(stats))
+        self.assertEqual(res, {"round": 3, "items": [
+            {"name": "Ysolde", "current": False, "foe": False},
+            {"name": "Goblin 1", "current": True, "foe": True},
+            {"name": "bram", "current": False, "foe": False},
+        ]})
+
+    # With no party listed, everyone in the order is a foe; round defaults to 1.
+    def test_no_players_all_foes_round_one(self):
+        res = self.run_js("out(turnBarView({turn_order: {order: ['Ogre'], current: 'Ogre'}}));")
+        self.assertEqual(res, {"round": 1, "items": [{"name": "Ogre", "current": True, "foe": True}]})
+
+    # Same rule as combat: no one named, no bar.
+    def test_no_bar_without_combatants(self):
+        res = self.run_js("out([turnBarView({}), turnBarView(null), turnBarView({turn_order: null}),"
+                          " turnBarView({turn_order: {current: 'Bram'}}), turnBarView({turn_order: {order: []}})]);")
+        self.assertEqual(res, [None] * 5)
+
+
+# ── S8: map.js canvas sizing (AC13: no blurry map at 4K) ─────────────────
+
+class TestCanvasSize(_NodeCase):
+    NEEDS = (MAP_JS,)
+
+    # The cell is the old _bmRender cs: the largest whole square that fits.
+    def test_cell_fits_container(self):
+        res = self.run_js("out([canvasSize(1152, 1000, 12, 8, 1), canvasSize(1000, 400, 12, 8, 1)]);")
+        self.assertEqual(res, [{"width": 1152, "height": 768, "cell": 96},
+                               {"width": 600, "height": 400, "cell": 50}])
+
+    # Plan S8 "the canvas is sized at devicePixelRatio": same CSS cell, more pixels.
+    def test_backing_store_scales_with_dpr(self):
+        res = self.run_js("out([canvasSize(1000, 400, 12, 8, 2), canvasSize(1000, 400, 12, 8, 1.5)]);")
+        self.assertEqual(res, [{"width": 1200, "height": 800, "cell": 50},
+                               {"width": 900, "height": 600, "cell": 50}])
+
+    # AC13 — the map column at 1080p and at a 4K viewport keeps the same
+    # share of the screen: cell and canvas scale by exactly 2.
+    def test_4k_is_twice_1080p(self):
+        res = self.run_js("out([canvasSize(1152, 1000, 24, 16, 1), canvasSize(2304, 2000, 24, 16, 1)]);")
+        self.assertEqual(res[1]["cell"], 2 * res[0]["cell"])
+        self.assertEqual((res[1]["width"], res[1]["height"]), (2 * res[0]["width"], 2 * res[0]["height"]))
+
+    # Never smaller than 8 px a square, as before.
+    def test_minimum_cell(self):
+        res = self.run_js("out(canvasSize(100, 100, 80, 80, 1));")
+        self.assertEqual(res, {"width": 640, "height": 640, "cell": 8})
+
+    # A missing or broken dpr counts as 1.
+    def test_bad_dpr_is_one(self):
+        res = self.run_js("out([canvasSize(1000, 400, 12, 8), canvasSize(1000, 400, 12, 8, 0),"
+                          " canvasSize(1000, 400, 12, 8, NaN), canvasSize(1000, 400, 12, 8, 'x')]);")
+        self.assertEqual(res, [{"width": 600, "height": 400, "cell": 50}] * 4)
 
 
 if __name__ == "__main__":

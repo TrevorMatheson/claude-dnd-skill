@@ -44,6 +44,77 @@ body { font-family: var(--f-body); overflow: hidden; }
 .stage[data-mode="minimal"] .layer > .inputbar { grid-column: 1; }
 .stage[data-mode="minimal"] .inputbar { justify-self: center; width: min(100%, 56rem); }
 
+/* ── Combat with a map (D10, mockup .combat): turn bar across the top, the
+      map in the left 60%, and on the right a compact Party header above a
+      full-height narration column whose top edge fades. ── */
+.stage[data-mode^="combat"] .layer > .scene { display: none; }
+.stage[data-mode="combat-map"] .layer {
+  grid-template-columns: minmax(0, 60fr) minmax(0, 40fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 1.375rem 1.875rem;
+  padding: 1.75rem 2.5rem 2.25rem;
+}
+.stage[data-mode="combat-map"] .turnbar { grid-column: 1 / 3; grid-row: 1; }
+.stage[data-mode="combat-map"] .mapbox { grid-column: 1; grid-row: 2 / 5; }
+.stage[data-mode="combat-map"] .party { grid-column: 2; grid-row: 2; grid-template-columns: 1fr 1fr; gap: .875rem 1.5rem; }
+.stage[data-mode="combat-map"] .layer > .feed { grid-column: 2; grid-row: 3; width: 100%; }
+.stage[data-mode="combat-map"] .layer > .inputbar { grid-column: 2; grid-row: 4; }
+.stage[data-mode="combat-map"] .party .pc-meta.plain,
+.stage[data-mode="combat-map"] .party .pc-class { display: none; }
+
+/* ── Combat without a map (D11): turn order large in the centre, narration
+      at full size below it, Party on the right. ── */
+.stage[data-mode="combat-nomap"] .layer {
+  grid-template-columns: minmax(0, 1fr) 26.25rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.stage[data-mode="combat-nomap"] .turnbar { grid-column: 1; grid-row: 1; justify-content: center; flex-wrap: wrap; font-size: 2.25rem; padding: 1rem 0 1.375rem; border-bottom: 1px solid var(--panel-line); }
+.stage[data-mode="combat-nomap"] .turnbar .dot { width: 3rem; height: 3rem; font-size: 1.25rem; }
+.stage[data-mode="combat-nomap"] .party { grid-column: 2; grid-row: 1 / 4; border-left: 1px solid var(--panel-line); padding: 1.125rem .5rem 1.125rem 1.75rem; align-content: start; }
+.stage[data-mode="combat-nomap"] .layer > .feed { grid-column: 1; grid-row: 2; }
+.stage[data-mode="combat-nomap"] .layer > .inputbar { grid-column: 1; grid-row: 3; }
+.stage[data-mode^="combat"] .feed { font-size: var(--narr-size-combat); }
+
+.turnbar { display: flex; align-items: center; gap: .875rem; padding: .75rem 1.125rem; font-size: 1.75rem; min-width: 0; overflow: hidden; }
+.turnbar .round { flex: none; font-family: var(--f-display); color: var(--ink-dim); margin-right: .625rem; white-space: nowrap; }
+.turnbar .toks { display: flex; align-items: center; gap: .875rem; min-width: 0; overflow: hidden; }
+/* More combatants past the right edge: fade it so the cut reads as "more". */
+.turnbar .toks.more {
+  mask-image: linear-gradient(to right, #000 calc(100% - 5rem), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 5rem), transparent);
+}
+.stage[data-mode="combat-nomap"] .turnbar .toks { flex-wrap: wrap; justify-content: center; overflow: visible; }
+.tok { display: flex; align-items: center; gap: .75rem; padding: .375rem 1.125rem .375rem .625rem; border-radius: 99px; border: 1px solid transparent; white-space: nowrap; color: var(--ink-dim); }
+.tok .dot { flex: none; width: 2.125rem; height: 2.125rem; border-radius: 50%; display: grid; place-items: center; font: 600 1rem var(--f-body); color: #120c08; background: var(--you); }
+.tok.foe .dot { background: var(--hp-low); }
+.tok.now { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
+.tok.now::after { content: "turn"; font-family: var(--f-label); font-size: 1.75rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); }
+.party { display: grid; gap: 1.125rem; min-height: 0; overflow: hidden; }
+
+/* The battle map: a board centred in its box, canvas backed at the device
+   pixel ratio (map.js), tokens on top. In a Tactical side panel the slot
+   takes the grid's shape (map.js sets aspect-ratio). */
+.mapbox, .map-slot { position: relative; min-height: 0; overflow: hidden; box-shadow: 0 0 0 1px var(--panel-line); }
+.map-slot { width: 100%; max-height: 55vh; }
+.map-board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.map-board canvas, .map-board img.map-bg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.map-token {
+  position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  font-weight: 700; color: #1b130a; box-shadow: 0 2px 6px rgba(0,0,0,.6);
+  transition: left .7s cubic-bezier(.3,.7,.2,1), top .7s cubic-bezier(.3,.7,.2,1);
+}
+.map-token .face { position: absolute; inset: 8%; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--you); font-family: var(--f-body); }
+.map-token.foe .face { background: #c98a7a; }
+.map-token .label {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: .125rem;
+  font-size: 1.125rem; font-weight: 600; color: var(--ink); white-space: nowrap; text-shadow: 0 1px 3px #000; pointer-events: none;
+}
+.map-token .cond {
+  position: absolute; top: -.25rem; right: -.25rem; min-width: 1.25rem; height: 1.25rem; padding: 0 .25rem;
+  border-radius: .625rem; background: #7a3fb0; color: #fff; font-size: .875rem; line-height: 1.25rem; text-align: center;
+}
+.map-token.down .face { filter: grayscale(1) brightness(.6); }
+.map-token.now { box-shadow: 0 0 0 .1875rem var(--accent), 0 2px 6px rgba(0,0,0,.6); z-index: 1; }
+
 /* Modules: thin rules between them, no boxes. Every panel and input-bar
    text is at least 1.75rem (28px at 1080p), D8's couch-distance floor. */
 .mod { display: grid; gap: .875rem; align-content: start; }

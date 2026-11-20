@@ -17,6 +17,9 @@
     left: document.getElementById('tv-side-l'),
     right: document.getElementById('tv-side-r'),
     bar: document.getElementById('tv-inputbar'),
+    turnbar: document.getElementById('tv-turnbar'),
+    party: document.getElementById('tv-party'),
+    map: document.getElementById('tv-map'),
   });
   const wait = TV.panels.makeWaitModel({ onChange: () => redraw() });
   function redraw() {
@@ -28,6 +31,9 @@
   }
   // Timed effects count down; refresh them while nothing else changes.
   setInterval(redraw, 30000);
+  // The map's cell size follows its box; redraw it when the window changes.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 100); });
 
   function onPayload(p) {
     if (!p || typeof p !== 'object') return;

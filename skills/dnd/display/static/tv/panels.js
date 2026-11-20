@@ -40,6 +40,19 @@
     };
   }
 
+  // The combat turn bar (D10): round, then a token per combatant; a name
+  // that isn't in the party is a foe. Null while the order names nobody.
+  function turnBarView(stats) {
+    const t = turnsView(stats);
+    if (!t) return null;
+    const party = new Set(list(stats && stats.players).filter((p) => p && p.name)
+      .map((p) => String(p.name).toLowerCase()));
+    return {
+      round: t.round,
+      items: t.items.map((i) => ({ name: i.name, current: i.current, foe: !party.has(i.name.toLowerCase()) })),
+    };
+  }
+
   function questsView(stats) {
     return list(stats && stats.quests).filter((q) => q && typeof q === 'object').map((q) =>
       ({ name: String(q.name || '—'), status: q.status != null ? String(q.status) : '' }));
@@ -202,8 +215,34 @@
   }
 
   function mapHtml(stats) {
-    // The map itself is drawn by map.js (S8); until then the slot says so.
-    return stats && stats.map ? '<div class="map-slot" data-map="1"></div>' : '<p class="mod-empty">No map yet</p>';
+    // map.js draws into the slot after the panel is on the page.
+    return stats && stats.map ? '<div class="map-slot" data-aspect="grid"></div>' : '<p class="mod-empty">No map yet</p>';
+  }
+
+  function initials(name) {
+    return String(name).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase();
+  }
+
+  function turnBarHtml(stats) {
+    const t = turnBarView(stats);
+    if (!t) return '';
+    return `<span class="round">Round ${esc(t.round)}</span><div class="toks">`
+      + t.items.map((i) => `<span class="tok${i.foe ? ' foe' : ''}${i.current ? ' now' : ''}">`
+        + `<span class="dot">${esc(initials(i.name))}</span>${esc(i.name)}</span>`).join('') + '</div>';
+  }
+
+  // A long fight can't fit one row: slide the tokens so the current one
+  // shows, with the one before it still in view.
+  function showCurrentTurn(bar) {
+    const toks = bar && bar.querySelector('.toks');
+    if (!toks) return;
+    const now = toks.querySelector('.tok.now');
+    if (!now || toks.scrollWidth <= toks.clientWidth) { toks.scrollLeft = 0; toks.classList.remove('more'); return; }
+    const prev = now.previousElementSibling;
+    toks.scrollLeft = Math.max(0, (prev || now).offsetLeft - toks.offsetLeft);
+    const nowRight = now.offsetLeft - toks.offsetLeft + now.offsetWidth;
+    if (nowRight > toks.scrollLeft + toks.clientWidth) toks.scrollLeft = nowRight - toks.clientWidth;
+    toks.classList.toggle('more', toks.scrollLeft + toks.clientWidth < toks.scrollWidth - 1);
   }
 
   const BODY = { party: partyHtml, turns: turnsHtml, map: mapHtml, quests: questsHtml, clock: clockHtml };
@@ -216,17 +255,39 @@
     }).join('');
   }
 
-  // Draw both side panels and the input bar. Redraws only what changed.
+  // Draw the side panels, the combat turn bar, party header and map, and the
+  // input bar for a resolved layout. Redraws only what changed.
   function mount(els) {
-    let last = { left: null, right: null, bar: null };
+    let last = { left: null, right: null, bar: null, turnbar: null, party: null };
+    const set = (key, html) => {
+      if (els[key] && html !== last[key]) { els[key].innerHTML = html; last[key] = html; }
+    };
+    const drawMap = (box, stats) => {
+      if (box && root.TV && root.TV.map) {
+        try { root.TV.map.draw(box, stats); } catch (err) { console.error('tv: map failed', err); }
+      }
+    };
 
     function render(resolved, stats, wait) {
-      const left = panelHtml(resolved.left, stats);
-      const right = panelHtml(resolved.right, stats);
-      if (els.left && left !== last.left) { els.left.innerHTML = left; last.left = left; }
-      if (els.right && right !== last.right) { els.right.innerHTML = right; last.right = right; }
-      if (els.left) { els.left.hidden = !resolved.left.length; els.left.dataset.count = resolved.left.length; }
-      if (els.right) { els.right.hidden = !resolved.right.length; els.right.dataset.count = resolved.right.length; }
+      const combat = resolved.mode === 'combat-map' || resolved.mode === 'combat-nomap';
+      const left = combat ? [] : resolved.left, right = combat ? [] : resolved.right;
+      set('left', panelHtml(left, stats));
+      set('right', panelHtml(right, stats));
+      if (els.left) { els.left.hidden = !left.length; els.left.dataset.count = left.length; }
+      if (els.right) { els.right.hidden = !right.length; els.right.dataset.count = right.length; }
+      set('turnbar', combat ? turnBarHtml(stats || {}) : '');
+      set('party', combat ? partyHtml(stats || {}) : '');
+      if (els.turnbar) { els.turnbar.hidden = !combat; if (combat) showCurrentTurn(els.turnbar); }
+      if (els.party) els.party.hidden = !combat;
+      if (els.map) {
+        els.map.hidden = resolved.mode !== 'combat-map';
+        if (resolved.mode === 'combat-map') drawMap(els.map, stats);
+        else { els.map.innerHTML = ''; delete els.map.dataset.key; }
+      }
+      for (const side of [els.left, els.right]) {
+        const slot = side && side.querySelector('.map-slot');
+        if (slot) drawMap(slot, stats);
+      }
       if (els.bar && wait) {
         const v = wait.view();
         const pips = wait.party().map((n) =>
@@ -242,7 +303,7 @@
     return { render };
   }
 
-  const api = { partyView, turnsView, questsView, clockView, makeWaitModel, panelHtml, mount };
+  const api = { partyView, turnsView, turnBarView, questsView, clockView, makeWaitModel, panelHtml, mount };
   root.TV = root.TV || {};
   root.TV.panels = api;
   if (typeof module !== 'undefined') module.exports = api;

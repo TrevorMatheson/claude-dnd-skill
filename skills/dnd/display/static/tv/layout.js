@@ -3,7 +3,7 @@
 // resolve(config, stats, override) is pure so node can test it; apply()
 // puts its result on the page. The saved settings are validated again here
 // with the same rules as display_config.py, so a hand-edited display.json
-// can't break the TV. Combat modes arrive in S8.
+// can't break the TV. Modes: story, minimal, combat-map, combat-nomap.
 (function (root) {
   'use strict';
 
@@ -46,10 +46,22 @@
     return { left, right };
   }
 
-  // eslint-disable-next-line no-unused-vars
+  // Combat is on while the turn order names someone — the same rule as the
+  // server's _combat_on (S4): a bare {current} or {order: []} is no fight.
+  function combatOn(stats) {
+    const to = stats && typeof stats === 'object' ? stats.turn_order : null;
+    return !!(to && typeof to === 'object' && Array.isArray(to.order) && to.order.length);
+  }
+
+  // The host's override wins (true: combat, false: the saved layout);
+  // otherwise the turn order decides (D9). The saved panels always come
+  // back too, so leaving combat restores them.
   function resolve(config, stats, override) {
     const { left, right } = panelsFrom(config);
-    const mode = left.length || right.length ? 'story' : 'minimal';
+    const fight = override === true || (override !== false && combatOn(stats));
+    let mode;
+    if (fight) mode = stats && stats.map ? 'combat-map' : 'combat-nomap';
+    else mode = left.length || right.length ? 'story' : 'minimal';
     return { mode, left, right };
   }
 
@@ -61,7 +73,7 @@
     stage.dataset.right = resolved.right.length ? 'on' : 'off';
   }
 
-  const api = { MODULES, PRESETS, resolve, apply };
+  const api = { MODULES, PRESETS, resolve, combatOn, apply };
   root.TV = root.TV || {};
   root.TV.layout = api;
   if (typeof module !== 'undefined') module.exports = api;
