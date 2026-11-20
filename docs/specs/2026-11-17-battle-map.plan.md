@@ -1,6 +1,6 @@
 ---
 spec: 2026-11-17-battle-map.md
-status: proposed      # proposed → approved
+status: approved       # proposed → approved
 ---
 
 # Build plan: Battle map (tiles, fog, timed moves, spell areas, attack sprites)
