@@ -549,6 +549,13 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 # Block order is display order. Stats, turn pointer, awaiting and moves go in
 # one /stats post after the blocks, so the sidebar changes as the narration
 # lands; the dice request (if any) is last.
+#
+# A turn may also name the place the party has reached (scene backgrounds
+# spec D5): "location": {"name": "The Flooded Crypt",
+#                        "look": "a half-submerged stone hall, pillars in black water"}
+# The name is how the picture is found again on a return (keep it the same);
+# the look is what the party sees, never the people in it. It rides the same
+# /stats post as "place". "location": null clears the place.
 
 _BLOCK_TYPES = ("narration", "action", "player", "npc", "dice", "tutor")
 
@@ -626,7 +633,36 @@ def _turn_stats(turn: dict) -> "dict | None":
         stats["turn_order"] = to
     if "awaiting" in turn:
         stats["awaiting"] = turn["awaiting"]
+    if "location" in turn:
+        stats["place"] = _turn_location(turn)
     return stats or None
+
+
+_LOCATION_NAME_MAX = 80
+_LOCATION_LOOK_MAX = 400
+
+
+def _turn_location(turn: dict) -> "dict | None":
+    """The turn's place as {"name", "look"}, or None for "location": null.
+    Raises ValueError for any other shape (scene backgrounds spec D5)."""
+    loc = turn.get("location")
+    if loc is None:
+        return None
+    if not isinstance(loc, dict):
+        raise ValueError(f"location must be an object or null, not {type(loc).__name__}")
+    unknown = set(loc) - {"name", "look"}
+    if unknown:
+        raise ValueError(f"location has unknown keys: {', '.join(sorted(unknown))}")
+    name, look = loc.get("name"), loc.get("look", "")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("location needs a name (text)")
+    if len(name) > _LOCATION_NAME_MAX:
+        raise ValueError(f"location name is over {_LOCATION_NAME_MAX} characters")
+    if not isinstance(look, str):
+        raise ValueError("location look must be text")
+    if len(look) > _LOCATION_LOOK_MAX:
+        raise ValueError(f"location look is over {_LOCATION_LOOK_MAX} characters")
+    return {"name": name.strip(), "look": look.strip()}
 
 
 def _apply_turn_moves(turn: dict) -> "dict | None":
@@ -671,12 +707,13 @@ def _apply_turn_moves(turn: dict) -> "dict | None":
 def send_turn(turn: dict, as_json: bool = False) -> int:
     """Send a whole DM turn in order. Returns a process exit code."""
     unknown = set(turn) - {"blocks", "stats", "turn", "round", "awaiting", "moves", "dice_request",
-                           "campaign"}
+                           "campaign", "location"}
     if unknown:
         print(f"send.py: --turn has unknown keys: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2
     try:
         payloads = [p for blk in (turn.get("blocks") or []) for p in _turn_block_payloads(blk)]
+        _turn_location(turn)
     except ValueError as exc:
         print(f"send.py: --turn: {exc}", file=sys.stderr)
         return 2
