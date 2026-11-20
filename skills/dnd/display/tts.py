@@ -395,12 +395,21 @@ def kokoro_installed() -> bool:
             and (m / "voices-v1.0.bin").exists())
 
 
+def blend_parts(voice) -> Optional[tuple]:
+    """("am_onyx", "am_adam") for the blend "am_onyx+am_adam" when both parts
+    are Kokoro voices; None for anything else (D20)."""
+    if not isinstance(voice, str) or voice.count("+") != 1:
+        return None
+    a, b = voice.split("+")
+    return (a, b) if a in KOKORO_VOICES and b in KOKORO_VOICES and a != b else None
+
+
 def is_kokoro(voice: str) -> bool:
-    return voice in KOKORO_VOICES
+    return voice in KOKORO_VOICES or blend_parts(voice) is not None
 
 
 def valid_voice(voice: str) -> bool:
-    return voice in ALL_VOICES
+    return voice in ALL_VOICES or blend_parts(voice) is not None
 
 
 def kokoro_standin(voice: str) -> str:
@@ -410,15 +419,29 @@ def kokoro_standin(voice: str) -> str:
     return GEMINI_TO_KOKORO.get(voice, DEFAULT_NARRATOR)
 
 
+_blend_flag: Optional[bool] = None   # from the last good /health; None = unknown
+
+
 def kokoro_health(timeout: float = 1.5) -> Optional[dict]:
-    """{"ok": True, "provider": "cuda"|"cpu", ...} from the local Kokoro
-    helper, or None when it isn't running."""
+    """{"ok": True, "provider": "cuda"|"cpu", "blend": bool, ...} from the
+    local Kokoro helper, or None when it isn't running. Remembers whether the
+    helper can blend two voices (an older helper has no "blend" key: False)."""
+    global _blend_flag
     try:
         with urllib.request.urlopen(f"{KOKORO_URL}/health", timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return data if data.get("ok") else None
     except Exception:
         return None
+    if not data.get("ok"):
+        return None
+    _blend_flag = data.get("blend") is True
+    return data
+
+
+def kokoro_blend_supported() -> Optional[bool]:
+    """Whether the running Kokoro helper blends voices: True / False from the
+    last good kokoro_health(), None when not known yet. No network call."""
+    return _blend_flag
 
 
 def kokoro_synthesize(text: str, voice: str = DEFAULT_NARRATOR, speed: float = 1.0,

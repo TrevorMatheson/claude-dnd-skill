@@ -65,13 +65,24 @@ class Engine:
         self.lock = threading.Lock()
         self.synth("Ready.", "bm_lewis")   # warm-up: the first call is slow
 
+    def can_blend(self) -> bool:
+        return hasattr(self.k, "get_voice_style")
+
     def synth(self, text: str, voice: str, speed: float = 1.0) -> bytes:
         import numpy as np
-        if voice not in self.voices:
-            voice = "bm_lewis"
+        style = voice
+        parts = voice.split("+") if voice.count("+") == 1 else None
+        if parts and all(p in self.voices for p in parts) and parts[0] != parts[1] \
+                and self.can_blend():
+            # A blend "a+b" (D20): half of each voice's style, in a's accent.
+            style = (0.5 * self.k.get_voice_style(parts[0])
+                     + 0.5 * self.k.get_voice_style(parts[1]))
+            voice = parts[0]
+        elif voice not in self.voices:
+            voice = style = "bm_lewis"
         lang = "en-gb" if voice.startswith("b") else "en-us"
         with self.lock:
-            samples, _sr = self.k.create(text, voice=voice, speed=speed, lang=lang)
+            samples, _sr = self.k.create(text, voice=style, speed=speed, lang=lang)
         pcm = np.clip(samples, -1.0, 1.0)
         return (pcm * 32767.0).astype("<i2").tobytes()
 
@@ -91,7 +102,8 @@ def _make_handler(engine: Engine):
         def do_GET(self):
             if self.path == "/health":
                 body = json.dumps({"ok": True, "provider": engine.device,
-                                   "voices": sorted(engine.voices)}).encode()
+                                   "voices": sorted(engine.voices),
+                                   "blend": engine.can_blend()}).encode()
                 self._send(200, body, "application/json")
             else:
                 self._send(404, b"not found", "text/plain")

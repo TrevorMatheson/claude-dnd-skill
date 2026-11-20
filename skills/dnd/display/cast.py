@@ -63,7 +63,8 @@ def kokoro_voices() -> list:
 
 
 def is_kokoro(v) -> bool:
-    return isinstance(v, str) and v in tts.KOKORO_VOICES
+    """A Kokoro voice or an "a+b" blend of two (D20)."""
+    return isinstance(v, str) and tts.is_kokoro(v)
 
 
 def is_gemini(v) -> bool:
@@ -299,7 +300,31 @@ def _pick(campaign, sections: list, prefer: Optional[str] = None, avoid=()) -> s
     allowed = [v for v in kokoro_voices() if v not in reserved]
     if not allowed:                       # every voice reserved: should never happen
         allowed = [v for v in kokoro_voices() if v != narrator_voice(campaign)] or kokoro_voices()
+    if tts.kokoro_blend_supported() is True:
+        blend = _new_blend(allowed, held)
+        if blend:
+            return blend
     return min(allowed, key=lambda v: (held.count(v), allowed.index(v)))
+
+
+def _new_blend(allowed: list, held: list) -> str:
+    """A blend "a+b" no NPC has yet: two allowed voices of the same group
+    (af / am / bf / bm), preferring parts that appear in the fewest blends so
+    the new voice sounds least like the others. "" when none is left."""
+    used_pairs = {frozenset(p) for p in (tts.blend_parts(v) for v in held) if p}
+    parts_used: dict = {}
+    for pair in used_pairs:
+        for v in pair:
+            parts_used[v] = parts_used.get(v, 0) + 1
+    best = None
+    for i, a in enumerate(allowed):
+        for b in allowed[i + 1:]:
+            if a[:2] != b[:2] or frozenset((a, b)) in used_pairs:
+                continue
+            score = (parts_used.get(a, 0) + parts_used.get(b, 0), i)
+            if best is None or score < best[0]:
+                best = (score, f"{a}+{b}")
+    return best[1] if best else ""
 
 
 def _voice_line(indent_from: str, voice: str) -> str:
@@ -376,7 +401,7 @@ def _must_move(campaign, sections: list, sec: dict) -> bool:
     player character, or shared with another NPC while free voices remain."""
     v = sec["voice"]
     reserved = _reserved(campaign)
-    if v in reserved:
+    if v in reserved or any(p in reserved for p in (tts.blend_parts(v) or ())):
         return True
     if any(s is not sec and s["voice"] == v for s in sections):
         held = set(_npc_held(sections))
@@ -409,10 +434,11 @@ def _reassign_npcs_holding(campaign, voice: str) -> list:
 def _set_npc(campaign, name: str, voice: str) -> None:
     if not is_kokoro(voice):
         raise ValueError(f"{voice!r} is not a Kokoro voice (see: cast.py voices --free)")
-    if voice in (narrator_voice(campaign), heard_narrator(campaign)):
-        raise ValueError(f"{voice} is the narrator's voice")
-    if voice in pc_voices(campaign):
-        raise ValueError(f"{voice} belongs to a player character")
+    parts = set(tts.blend_parts(voice) or (voice,))
+    if parts & {narrator_voice(campaign), heard_narrator(campaign)}:
+        raise ValueError(f"{voice} is or contains the narrator's voice")
+    if parts & pc_voices(campaign):
+        raise ValueError(f"{voice} is or contains a player character's voice")
     with _lock:
         lines, eol, exists = _npc_lines(campaign)
         if not exists and _npcs_path(campaign).exists():
