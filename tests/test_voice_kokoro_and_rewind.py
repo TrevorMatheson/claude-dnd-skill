@@ -96,6 +96,27 @@ class KokoroRouting(unittest.TestCase):
         self.assertFalse([m for m in self.sent if "tts_quota" in m],
                          "the table was told the voice is gone while the local voice still works")
 
+    def test_local_only_narration_never_reaches_gemini_when_kokoro_is_down(self):
+        # The TV reads narration a sentence at a time; with Kokoro down that
+        # would spend Gemini's ~10-a-day quota in one turn. It asks for the
+        # local voice only and types the text unvoiced when refused.
+        self.app._kokoro_ok = False
+        with mock.patch.object(self.app._tts, "synthesize_strict") as gem:
+            r = self.client.post("/tts", json={"text": "The door creaks.", "voice": "bm_lewis", "local_only": True})
+        self.assertEqual(r.status_code, 503)
+        gem.assert_not_called()
+
+    def test_local_only_narration_still_reads_with_kokoro_up(self):
+        r = self.client.post("/tts", json={"text": "The door creaks.", "voice": "bm_lewis", "local_only": True})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["X-Audio-Engine"], "kokoro")
+
+    def test_local_only_with_no_voice_uses_the_local_narrator(self):
+        with mock.patch.object(self.app, "_read_narrator_voice", return_value="bm_lewis"):
+            r = self.client.post("/tts", json={"text": "The door creaks.", "local_only": True})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["X-Audio-Engine"], "kokoro")
+
     def test_a_long_turn_read_by_sentence_is_not_rate_limited(self):
         codes = [self.client.post("/tts", json={"text": f"Sentence {i}.", "voice": "bm_lewis"}).status_code
                  for i in range(40)]

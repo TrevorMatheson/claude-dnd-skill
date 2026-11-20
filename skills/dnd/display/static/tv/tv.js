@@ -1,12 +1,47 @@
 // TV page startup: open the update stream and hand each payload to the parts
-// of the page. Voice joins in a later step of the plan.
+// of the page.
 (function () {
   'use strict';
   const TV = window.TV;
   const token = TV.page.token;
   const stage = document.getElementById('tv-stage');
 
-  const feed = TV.feed.mount(document.getElementById('tv-feed'), TV.feed.makeFeedModel(), { token });
+  // Voice (S9): one audio timeline that the feed types in step with. The TV
+  // shows no voice-state or quota notices (D17); with no voice it types
+  // text only. Narration asks for the local engine only (`local_only`): one
+  // Gemini request per sentence would use up its daily quota in a turn, so
+  // with Kokoro down the server refuses and the narration types unvoiced.
+  let voiceOn = TV.page.voiceOn;
+  const audio = TV.voice.makeWebAudio();
+  const tapBtn = document.getElementById('tv-tap-audio');
+  tapBtn.addEventListener('click', () => {
+    audio.unlock().then(() => { tapBtn.hidden = true; });
+  });
+  const ttsHeaders = { 'Content-Type': 'application/json' };
+  if (token) ttsHeaders['X-DND-Token'] = token;
+  let feed = null;
+  const voice = TV.voice.makeVoice({
+    fetchTts(body, info) {
+      if (!voiceOn) return Promise.reject(new Error('voice off'));
+      const req = info && info.kind === 'narration' ? Object.assign({ local_only: true }, body) : body;
+      return fetch('/tts', { method: 'POST', headers: ttsHeaders, body: JSON.stringify(req) })
+        .then((r) => { if (!r.ok) throw new Error('TTS ' + r.status); return r.arrayBuffer(); })
+        .then((buf) => audio.decode(buf));
+    },
+    play: (clip, opts) => audio.play(clip, opts),
+    stop: () => audio.stop(),
+    type: (seg) => (feed ? feed.type(seg) : undefined),
+    isUnlocked: () => audio.isUnlocked(),
+    onLocked() {
+      if (!voiceOn) return;
+      tapBtn.hidden = false;
+      // Some browsers allow audio without a tap; then the button goes at once.
+      audio.unlock().then(() => { if (audio.isUnlocked()) tapBtn.hidden = true; });
+    },
+    canVoice: () => voiceOn,
+  });
+
+  feed = TV.feed.mount(document.getElementById('tv-feed'), TV.feed.makeFeedModel(), { token, voice });
   const devices = TV.devices.mount(document.getElementById('tv-devices'), TV.devices.makeDeviceModel(), { token });
   const sceneLabel = document.getElementById('scene-indicator');
 
@@ -40,8 +75,16 @@
     feed.apply(p);
     devices.apply(p);
     let changed = false;
+    // The server's voice state ({on, reason}); a block's own `voice` is a string.
+    if (p.voice && typeof p.voice === 'object') {
+      voiceOn = !!p.voice.on;
+      // Voice off mid-burst: stop talking but show every block, as text.
+      if (!voiceOn) { feed.settle(); tapBtn.hidden = true; }
+    }
+    if (Array.isArray(p.read_actions)) voice.readActions(p.read_actions);
     if (p.display && typeof p.display === 'object') {
       config = p.display.config || null;
+      if (config && config.voice) voice.setSettings(config.voice);
       override = p.display.mode_override == null ? null : p.display.mode_override;
       changed = true;
     }

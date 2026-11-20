@@ -2599,6 +2599,11 @@ def tts_synthesize():
         return _pcm(_tts.kokoro_synthesize(text, v, speed=speed), "kokoro", _tts.kokoro_standin(v))
 
     is_local = getattr(_tts, "is_kokoro", lambda v: False)(voice)
+    # The TV reads narration a sentence at a time and asks for the local voice
+    # only: routed to Gemini, one turn would use up the day's quota. Refused,
+    # it types the text without voice.
+    if data.get("local_only") and not (is_local and _kokoro_ok):
+        return "Local voice unavailable", 503
     if is_local:
         if _kokoro_ok:
             try:

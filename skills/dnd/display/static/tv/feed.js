@@ -153,13 +153,87 @@
             c ? `${c.request_id}:${(c.pending || []).join(',')}` : ''].join('|');
   }
 
+  const CHAR_MS = 36;   // typing speed with no voice to keep pace with (old charDelay)
+
   // Draw `model` into `el` after every payload that changes it. `opts.token`
-  // signs the rewind request.
+  // signs the rewind request. With `opts.voice` (voice.js makeVoice) every
+  // live block goes through the voice timeline: it appears when its turn
+  // comes and types out — in step with its voice when it has one — while
+  // later blocks wait (the old page's deferral queue). History shows whole.
   function mount(el, model, opts) {
     opts = opts || {};
     const headers = { 'Content-Type': 'application/json' };
     if (opts.token) headers['X-DND-Token'] = opts.token;
+    const voice = opts.voice || null;
     let drawn = null;
+    // Per block: {key, shown, started, done}. Blocks are the model's own
+    // objects, so a WeakMap follows them across re-draws.
+    let reveal = new WeakMap();
+    let nextKey = 1;
+    let version = 0;      // bumps when a block starts or finishes typing
+
+    const stateOf = (b) => reveal.get(b);
+
+    function track(blocks) {
+      for (const b of blocks) {
+        if (reveal.has(b)) continue;
+        const live = voice && !b.history;
+        reveal.set(b, { key: nextKey++, shown: live ? '' : String(b.text || ''), started: !live, done: !live });
+        if (live) voice.enqueue(b);
+      }
+    }
+
+    // Rewind, clear or a server restart replace the feed: stop the voice and
+    // show whatever is left whole.
+    function settleAll() {
+      if (voice) voice.reset();
+      for (const b of model.view().blocks) {
+        const st = stateOf(b);
+        if (st) { st.started = true; st.done = true; st.shown = String(b.text || ''); }
+      }
+      version++;
+    }
+
+    function partialHTML(b, shown) {
+      // Unclosed ** or * mid-sentence would show as stray asterisks.
+      return blockHTML(Object.assign({}, b, { text: shown })).replace(/\*/g, '');
+    }
+
+    function updateTyping(b, st) {
+      const node = el.querySelector(`[data-key="${st.key}"]`);
+      if (!node) return;
+      const rewind = node.querySelector('.rewind-btn');
+      node.innerHTML = partialHTML(b, st.shown);
+      if (rewind) node.appendChild(rewind);
+    }
+
+    // voice.js calls this for each segment of a block, in order, and waits
+    // for it: instant (history), all at once (msPerChar 0 on a block that
+    // isn't narration), or typed at msPerChar (0 = the normal speed).
+    function type(seg) {
+      const b = seg.block, st = b && stateOf(b);
+      if (!st || st.done) return Promise.resolve();
+      const full = String(b.text || '');
+      const finish = () => {
+        if (st.shown.length >= full.length) { st.done = true; st.shown = full; version++; render(true); }
+      };
+      if (!st.started) { st.started = true; version++; render(true); }
+      const speaks = blockClass(b) === 'narr' || blockClass(b) === 'npc';
+      const ms = seg.msPerChar || (speaks ? CHAR_MS : 0);
+      if (seg.instant || !ms) { st.shown += seg.text; finish(); return Promise.resolve(); }
+      const target = st.shown + seg.text;
+      const t0 = Date.now(), from = st.shown.length;
+      return new Promise((resolve) => {
+        const tick = () => {
+          if (st.done) { resolve(); return; }          // settled by a rewind or clear
+          const n = Math.min(target.length, from + Math.floor((Date.now() - t0) / ms) + 1);
+          if (n > st.shown.length) { st.shown = target.slice(0, n); updateTyping(b, st); }
+          if (st.shown.length >= target.length) { finish(); resolve(); return; }
+          setTimeout(tick, Math.min(60, Math.max(16, ms)));
+        };
+        tick();
+      });
+    }
     // The armed ↶ survives a re-draw: which block it was on, and until when.
     let armed = { seq: null, until: 0 };
 
@@ -201,10 +275,12 @@
 
     function render(force) {
       const v = model.view();
-      const sig = signature(v);
+      track(v.blocks);
+      const sig = signature(v) + '|' + version;
       if (!force && sig === drawn) return;
       drawn = sig;
-      const shown = v.blocks.slice(-MAX_BLOCKS);
+      // A live block waiting its turn on the voice timeline isn't shown yet.
+      const shown = v.blocks.filter((b) => { const st = stateOf(b); return !st || st.started; }).slice(-MAX_BLOCKS);
       const frag = document.createDocumentFragment();
       let lastTurn = null;
       let lastTurnSeq = null;
@@ -212,9 +288,12 @@
         const div = document.createElement('div');
         // Every block but the newest is "old" (narration dims; NPC and
         // player lines keep their colours). `history` only means "not spoken".
-        div.className = `block ${blockClass(b)}${i < shown.length - 1 ? ' old' : ''}`;
+        const st = stateOf(b);
+        const typing = st && !st.done;
+        div.className = `block ${blockClass(b)}${i < shown.length - 1 ? ' old' : ''}${typing ? ' typing' : ''}`;
         if (typeof b.seq === 'number') div.dataset.seq = String(b.seq);
-        div.innerHTML = blockHTML(b);
+        if (st) div.dataset.key = String(st.key);
+        div.innerHTML = typing ? partialHTML(b, st.shown) : blockHTML(b);
         if (b.player || b.action) { lastTurn = div; lastTurnSeq = b.seq; }
         frag.appendChild(div);
       });
@@ -234,9 +313,30 @@
     }
 
     render(true);
+    let epoch = null;
     return {
-      apply(p) { model.apply(p); render(false); },
+      apply(p) {
+        // A reconnect to the same server run replays only what was missed,
+        // so the voice carries on; a new run (restart), rewind or clear
+        // replaces the feed.
+        let restarted = false;
+        if (p && typeof p === 'object' && p.hello && typeof p.hello === 'object') {
+          restarted = epoch !== null && p.hello.epoch !== epoch;
+          epoch = p.hello.epoch;
+        }
+        const replaces = p && typeof p === 'object' && ('rewind' in p || p.clear || restarted);
+        if (replaces && voice) settleAll();
+        model.apply(p);
+        if (replaces && voice) {
+          // The rewound log is history: mark it shown, not spoken.
+          for (const b of model.view().blocks) if (!reveal.has(b)) reveal.set(b, { key: nextKey++, shown: String(b.text || ''), started: true, done: true });
+        }
+        render(false);
+      },
       render: () => render(true),
+      type,
+      // Stop the voice and show every block whole (the voice turned off).
+      settle() { if (voice) settleAll(); render(true); },
     };
   }
 
