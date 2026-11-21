@@ -90,30 +90,12 @@ body { font-family: var(--f-body); overflow: hidden; }
 .tok.now::after { content: "turn"; font-family: var(--f-label); font-size: 1.75rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); }
 .party { display: grid; gap: 1.125rem; min-height: 0; overflow: hidden; }
 
-/* The battle map: a board centred in its box, canvas backed at the device
-   pixel ratio (map.js), tokens on top. In a Tactical side panel the slot
-   takes the grid's shape (map.js sets aspect-ratio). */
+/* The battle map's box. The board inside it (tiles, fog, tokens, effects)
+   is drawn by static/map/board.js and styled by static/map/map.css; in a
+   Tactical side panel the slot takes the grid's shape (map.js sets
+   aspect-ratio). */
 .mapbox, .map-slot { position: relative; min-height: 0; overflow: hidden; box-shadow: 0 0 0 1px var(--panel-line); }
 .map-slot { width: 100%; max-height: 55vh; }
-.map-board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.map-board canvas, .map-board img.map-bg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-.map-token {
-  position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 50%;
-  font-weight: 700; color: #1b130a; box-shadow: 0 2px 6px rgba(0,0,0,.6);
-  transition: left .7s cubic-bezier(.3,.7,.2,1), top .7s cubic-bezier(.3,.7,.2,1);
-}
-.map-token .face { position: absolute; inset: 8%; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--you); font-family: var(--f-body); }
-.map-token.foe .face { background: #c98a7a; }
-.map-token .label {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: .125rem;
-  font-size: 1.125rem; font-weight: 600; color: var(--ink); white-space: nowrap; text-shadow: 0 1px 3px #000; pointer-events: none;
-}
-.map-token .cond {
-  position: absolute; top: -.25rem; right: -.25rem; min-width: 1.25rem; height: 1.25rem; padding: 0 .25rem;
-  border-radius: .625rem; background: #7a3fb0; color: #fff; font-size: .875rem; line-height: 1.25rem; text-align: center;
-}
-.map-token.down .face { filter: grayscale(1) brightness(.6); }
-.map-token.now { box-shadow: 0 0 0 .1875rem var(--accent), 0 2px 6px rgba(0,0,0,.6); z-index: 1; }
 
 /* Modules: thin rules between them, no boxes. Every panel and input-bar
    text is at least 1.75rem (28px at 1080p), D8's couch-distance floor. */
