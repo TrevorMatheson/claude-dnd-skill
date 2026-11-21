@@ -32,6 +32,8 @@
     const slideTimers = new Map();
     let area = null, areaTimer = null;
     let slideKey = 0;
+    let attacks = [];                  // attack sprites playing now (milestone 2)
+    const attackTimers = new Set();
 
     const nameKey = (n) => String(n);
 
@@ -113,6 +115,35 @@
       areaTimer = setT(() => { area = null; areaTimer = null; changed(); }, AREA_MS);
     }
 
+    // A block's attacks (D15): planned from the squares as drawn after its
+    // moves, back to back, at most 2 s (sprites.js). Each leaves the state
+    // when its time is up; the board draws what is listed.
+    function playAttacks(list) {
+      const SP = root.TV && root.TV.sprites;
+      if (!SP || !Array.isArray(list) || !list.length) return;
+      const pos = {};
+      for (const [n, t] of shown) pos[n] = [t.x, t.y];
+      const visible = opts.isVisible || ((n) => shown.has(nameKey(n)));
+      const items = SP.schedule(list, { pos, visible });
+      for (const it of items) {
+        if (it.snapped) continue;
+        const item = Object.assign({}, it, { key: ++slideKey });
+        attacks.push(item);
+        const timer = setT(() => {
+          attackTimers.delete(timer);
+          attacks = attacks.filter((a) => a !== item);
+          changed();
+        }, (it.delay || 0) + it.duration);
+        attackTimers.add(timer);
+      }
+    }
+
+    function clearAttacks() {
+      for (const t of attackTimers) clearT(t);
+      attackTimers.clear();
+      attacks = [];
+    }
+
     const api = {
       // A live block was queued with its effects (or none).
       arrive(id, fx) {
@@ -136,11 +167,8 @@
         if (!p) return;
         applyMoves(p.fx, true);
         showArea(p.fx.area);
-        // Attacks (milestone 2) are played by the sprite layer.
-        if (api.onAttacks && Array.isArray(p.fx.attacks) && p.fx.attacks.length) {
-          try { api.onAttacks(p.fx.attacks); } catch (_) {}
-        }
         recompute();
+        playAttacks(p.fx.attacks);
         changed();
       },
       // The block is history or was skipped: snap, no animation.
@@ -168,6 +196,7 @@
         slides = {};
         if (areaTimer != null) clearT(areaTimer);
         area = null; areaTimer = null;
+        clearAttacks();
         recompute();
         changed();
       },
@@ -177,10 +206,9 @@
         for (const p of pending.slice()) if (t - p.at >= SAFETY_MS) api.skip(p.id);
       },
       shownState() {
-        return { tokens: [...shown.values()], slides: Object.assign({}, slides), area };
+        return { attacks: attacks.slice(), tokens: [...shown.values()], slides: Object.assign({}, slides), area };
       },
       pendingCount() { return pending.length; },
-      onAttacks: null,
     };
     return api;
   }

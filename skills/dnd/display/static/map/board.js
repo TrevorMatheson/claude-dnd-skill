@@ -407,7 +407,45 @@
     }
     for (const el of [...layer.children]) if (!keep.has(el.id)) el.remove();
     drawArea(board, view.area || null, s);
+    drawAttacks(board, Array.isArray(view.attacks) ? view.attacks : [], s);
     return f;
+  }
+
+  // Attack sprites (milestone 2, D15/D16): each playing attack's SVG from
+  // sprites.js, drawn once per attack (its key) and removed when it ends;
+  // the target's flash/whiff/glance class goes on its token for that time.
+  function drawAttacks(board, attacks, s) {
+    const svg = board.querySelector('svg.map-fx');
+    const SP = root.TV && root.TV.sprites;
+    if (!svg) return;
+    const want = new Map(attacks.map((a) => [String(a.key) + '|' + s, a]));
+    for (const g of [...svg.querySelectorAll('g.atk')]) {
+      if (!want.has(g.dataset.key)) g.remove(); else want.delete(g.dataset.key);
+    }
+    if (SP) {
+      for (const [k, a] of want) {
+        const html = SP.svg(a, s);
+        if (!html) continue;
+        const holder = document.createElementNS(SVGNS, 'g');
+        holder.innerHTML = html;
+        const g = holder.firstElementChild;
+        if (!g) continue;
+        g.dataset.key = k;
+        svg.appendChild(g);
+      }
+    }
+    const classes = Object.values((SP && SP.CLASSES) || {});
+    const byTarget = new Map();
+    for (const a of attacks) if (a.target && a.targetClass) byTarget.set(a.target, a);
+    for (const el of board.querySelectorAll('.bm-token')) {
+      const a = byTarget.get(el.dataset.name);
+      for (const c of classes) if (!a || a.targetClass !== c) el.classList.remove(c);
+      if (a) {
+        el.style.setProperty('--atk-delay', (a.delay || 0) + 'ms');
+        el.style.setProperty('--atk-ms', a.duration + 'ms');
+        el.classList.add(a.targetClass);
+      }
+    }
   }
 
   // A spell area (D14): its squares softly filled, the outer edge of the
@@ -506,7 +544,7 @@
 
   const api = {
     fit, tileKind, tokenView, hpState, initials, conditionIcon, STEPS,
-    drawTiles, drawFog, drawArea, render, slide, tokenId, ensureBoard,
+    drawTiles, drawFog, drawArea, drawAttacks, render, slide, tokenId, ensureBoard,
   };
   root.TV = root.TV || {};
   root.TV.board = Object.assign(root.TV.board || {}, api);

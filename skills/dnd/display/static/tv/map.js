@@ -50,10 +50,15 @@
 
   // The effect timeline (static/map/fx.js): moves and spell areas play when
   // their narration block starts (D12, D14), skipped blocks snap (D17).
-  let fx = null, lastMap, onChange = null;
+  let fx = null, lastMap, onChange = null, drawnNames = null;
   function timeline() {
     if (!fx && root.TV && root.TV.fx) {
-      fx = root.TV.fx.makeFx({ onChange: () => { if (onChange) { try { onChange(); } catch (_) {} } } });
+      fx = root.TV.fx.makeFx({
+        onChange: () => { if (onChange) { try { onChange(); } catch (_) {} } },
+        // An attack's unseen side doesn't play (fog, D9 + D15): what the
+        // board drew last is what the table can see.
+        isVisible: (name) => !drawnNames || drawnNames.has(String(name)),
+      });
     }
     return fx;
   }
@@ -78,21 +83,23 @@
     if (!m || !m.grid || !m.grid.w || !m.grid.h || !B) { box.innerHTML = ''; delete box.dataset.key; return; }
     if (box.dataset.aspect === 'grid') box.style.aspectRatio = `${m.grid.w} / ${m.grid.h}`;
     const to = (stats && stats.turn_order) || {};
-    let tokens = Array.isArray(m.tokens) ? m.tokens : [], slides = {}, area = null, settled = true;
+    let tokens = Array.isArray(m.tokens) ? m.tokens : [], slides = {}, area = null, attacks = [], settled = true;
     const t = timeline();
     if (t) {
       if (m !== lastMap) { lastMap = m; t.setTarget(m); }
       const st = t.shownState();
-      tokens = st.tokens; slides = st.slides || {}; area = st.area || null;
+      tokens = st.tokens; slides = st.slides || {}; area = st.area || null; attacks = st.attacks || [];
       settled = !t.pendingCount();
     }
     const seen = sight(box, m, tokens, settled);
+    drawnNames = new Set(seen.tokens.map((x) => String(x.name)));
     B.render(box, {
       map: m,
       tokens: seen.tokens,
       fog: seen.fog,
       slides,
       area,
+      attacks,
       players: Array.isArray(stats.players) ? stats.players : [],
       current: to.current || null,
       mine: null,
