@@ -8487,6 +8487,9 @@ function _bmEnsurePanel() {
 }
 
 function _bmHp(t) {
+  // Monsters carry only a rough hp_state (battle map spec D8).
+  const steps = { healthy: 1, bloodied: 0.5, near_death: 0.2 };
+  if (!t.hp && t.hp_state in steps) return steps[t.hp_state];
   const p = _bmState.players[t.name.toLowerCase()];
   const hp = t.hp || (p && p.hp);
   if (!hp) return null;

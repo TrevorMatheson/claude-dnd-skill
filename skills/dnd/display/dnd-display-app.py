@@ -2338,13 +2338,15 @@ def _clean_map(m):
                 tok["hp"] = hp
         else:
             # D8: a monster's numbers never reach a screen, only a rough state.
-            state = t.get("hp_state") if t.get("hp_state") in _HP_STATES else None
-            if state is None and hp is not None:
+            state = None
+            if hp is not None:      # numbers, when sent, decide the state
                 try:
                     cur, mx = (hp[0], hp[1]) if isinstance(hp, list) else (hp.get("current"), hp.get("max"))
                     state = _bm_hp_state(cur, mx)
                 except (TypeError, IndexError, KeyError, AttributeError):
                     state = None
+            if state is None and t.get("hp_state") in _HP_STATES:
+                state = t["hp_state"]
             if state:
                 tok["hp_state"] = state
         if isinstance(t.get("conditions"), list):
@@ -3750,6 +3752,9 @@ def rewind_turn():
     _persist_tail()
     with _stats_lock:
         _current_stats = state.get("stats") or {}
+        # A snapshot from before the v2 map cleaning holds the raw map.
+        if "map" in _current_stats:
+            _current_stats["map"] = _clean_map(_current_stats["map"])
     _persist_stats()
     # Moves and rolls sent for the undone turn go with it.
     with _queue_file_lock:
