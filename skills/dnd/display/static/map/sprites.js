@@ -95,7 +95,9 @@
       // A shot that misses glances off short of the target's disc.
       if (T && item.outcome === 'deflect') {
         const L = Math.hypot(T[0] - F[0], T[1] - F[1]) || 1;
-        const k = Math.max(0, (L - s * 0.5) / L);
+        // the arrow's tip is drawn ahead of its origin; stop it at the disc's edge
+        const short = s * (item.sprite === 'arrow' ? 0.85 : 0.5);
+        const k = Math.max(0, (L - short) / L);
         end = [F[0] + (T[0] - F[0]) * k, F[1] + (T[1] - F[1]) * k];
       }
       const dx = n2(end[0] - F[0]), dy = n2(end[1] - F[1]);

@@ -134,7 +134,9 @@
       if (!slideStarts.has(k)) slideStarts.set(k, nowMs);
       const frac = (nowMs - slideStarts.get(k)) / SLIDE_MS;
       if (frac < 1) sliding = true;
-      const sq = alongPath(sl.path || sl, frac);
+      // the token eases out (board.slide), so the eyes do too
+      const eased = frac >= 1 ? 1 : 1 - Math.pow(1 - Math.max(0, frac), 2.5);
+      const sq = alongPath(sl.path || sl, eased);
       return sq ? Object.assign({}, tok, { x: sq[0], y: sq[1] }) : tok;
     });
     if (slideStarts.size > 50) slideStarts.clear();

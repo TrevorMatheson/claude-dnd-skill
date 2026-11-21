@@ -126,11 +126,21 @@
 .map-fx .deflect line { stroke: #b9d3ea; stroke-width: 2.5; stroke-linecap: round; }
 .map-fx .deflect .ricochet { fill: none; stroke: rgba(185, 211, 234, .8); stroke-width: 2; stroke-dasharray: 3 4; }
 .map-fx .atk .deflect { animation-name: bm-deflect; }
+/* sparks as the shot arrives (85% of its flight) */
 @keyframes bm-deflect {
-  0%, 70% { opacity: 0; transform: scale(.4) rotate(0deg); }
-  80% { opacity: 1; }
+  0%, 80% { opacity: 0; transform: scale(.4) rotate(0deg); }
+  88% { opacity: 1; transform: scale(1) rotate(10deg); }
   100% { opacity: 0; transform: scale(1.3) rotate(25deg); }
 }
+/* a blade lands mid-sweep, so a melee hit flashes earlier than a shot */
+.map-fx .atk.sword .flash { animation-name: bm-flash-melee; }
+@keyframes bm-flash-melee {
+  0%, 38% { opacity: 0; transform: scale(.3); }
+  50% { opacity: 1; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(1.25); }
+}
+.bm-token.atk-hit.atk-melee .face { animation-name: bm-tok-hit-melee; }
+@keyframes bm-tok-hit-melee { 0%, 38% { filter: none; } 50% { filter: brightness(2.2) saturate(.4); } 70%, 100% { filter: none; } }
 /* the target token itself: a flash on a hit, a dodge on a miss */
 .bm-token.atk-hit .face { animation: bm-tok-hit var(--atk-ms, 650ms) ease-out var(--atk-delay, 0ms) both; }
 @keyframes bm-tok-hit { 0%, 74% { filter: none; } 86% { filter: brightness(2.2) saturate(.4); } 100% { filter: none; } }

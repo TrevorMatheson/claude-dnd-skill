@@ -440,6 +440,7 @@
     for (const el of board.querySelectorAll('.bm-token')) {
       const a = byTarget.get(el.dataset.name);
       for (const c of classes) if (!a || a.targetClass !== c) el.classList.remove(c);
+      el.classList.toggle('atk-melee', !!a && a.kind === 'melee');
       if (a) {
         el.style.setProperty('--atk-delay', (a.delay || 0) + 'ms');
         el.style.setProperty('--atk-ms', a.duration + 'ms');

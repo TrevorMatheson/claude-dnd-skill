@@ -548,3 +548,22 @@ class TestSpriteWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TestArrowMissStopsShort(unittest.TestCase):
+    """QA re-verify: a missed arrow's head ended inside the target's disc."""
+
+    def test_missed_arrow_ends_outside_the_disc(self):
+        r = _run_node(self, ("const SP = require(%s);\n" % json.dumps(str(SPRITES_JS))) + """
+const s = 36;
+const it = SP.schedule([{ from: 'A', to: 'B', kind: 'ranged', hit: false }],
+  { pos: { A: [3, 2], B: [10, 3] }, visible: () => true })[0];
+const m = SP.svg(it, s).match(/--dx:([-0-9.]+)px;--dy:([-0-9.]+)px/);
+const dx = +m[1], dy = +m[2];
+const L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+const F = [(3.5) * s, (2.5) * s], T = [(10.5) * s, (3.5) * s];
+const tip = [F[0] + dx + ux * 0.32 * s, F[1] + dy + uy * 0.32 * s];
+console.log(JSON.stringify({ gap: Math.hypot(T[0] - tip[0], T[1] - tip[1]) }));
+""")
+        self.assertGreater(r["gap"], 0.45 * 36, "the arrow tip must stop outside the target's disc")
