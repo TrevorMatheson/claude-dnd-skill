@@ -49,7 +49,8 @@ def build_prompt(look: str, style: str) -> str:
     parts = [
         f"A wide {ASPECT_RATIO} landscape view of this place, as travellers would "
         f"see it on arriving: {look}.",
-        "Show the place itself, empty, as a background painting.",
+        "Show the place itself, empty, as a background painting that fills the "
+        "whole frame edge to edge, with no border, frame or black bars.",
     ]
     if style:
         parts.append(f"Art style: {style}.")
