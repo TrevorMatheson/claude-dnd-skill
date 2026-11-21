@@ -40,18 +40,26 @@
   background: #4b2763; color: var(--cond); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6);
 }
 .bm-token .hp {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 1px;
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 2px; z-index: 1;
   padding: 0 .3em; border-radius: .3em; background: rgba(10, 7, 4, .78);
   color: var(--ink); font-family: var(--f-body); font-weight: 600; white-space: nowrap; line-height: 1.25;
 }
 .bm-token.down .face { filter: grayscale(1) brightness(.55); }
-/* The current turn: an accent ring and a lift. */
+/* The current turn: an accent halo outside the HP ring (never over it) and
+   a lift. */
 .bm-token.now { z-index: 2; }
-.bm-token.now .face {
-  box-shadow: 0 0 0 .18rem var(--accent), 0 .5rem .9rem rgba(0, 0, 0, .7);
-  transform: translateY(-6%) scale(1.06);
+.bm-token.now::before {
+  content: ""; position: absolute; inset: -14%; border-radius: 50%;
+  border: max(2px, .16rem) solid var(--accent); box-shadow: 0 0 .7rem var(--accent);
+  animation: bm-now 1.6s ease-in-out infinite alternate;
 }
-.bm-token.mine .face { box-shadow: 0 0 0 .14rem var(--you), 0 2px 6px rgba(0, 0, 0, .65); }
+.bm-token.now .ring, .bm-token.now .face { transform: translateY(-5%); }
+.bm-token.now .face { box-shadow: 0 .45rem .8rem rgba(0, 0, 0, .75), inset 0 0 0 1px rgba(0, 0, 0, .35); }
+@keyframes bm-now { from { opacity: .7; } to { opacity: 1; } }
+/* A phone's own token: a quiet outer ring in the player colour. */
+.bm-token.mine::after {
+  content: ""; position: absolute; inset: -8%; border-radius: 50%; border: 2px dashed var(--you);
+}
 
 /* Spell areas: the squares outlined in the accent, a soft fill, then fade. */
 .map-fx .area rect { fill: var(--accent-soft); stroke: none; }

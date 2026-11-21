@@ -133,8 +133,8 @@
   }
 
   const PAL = {
-    floor: '#4a4036', seam: '#2c251e', wall: '#2e251d', wallTop: '#5a4b3c', wallDark: '#120d09',
-    door: '#7a5431', doorDark: '#3f2a16', iron: '#2a2622', rough: '#3d453a', pebble: '#262b24',
+    floor: '#6a5e50', seam: '#40372d', wall: '#1c1611', wallTop: '#8a7660', wallDark: '#070504',
+    door: '#9a6a3a', doorDark: '#4a3119', iron: '#2a2622', rough: '#3e5a58', pebble: '#22302f',
     block: '#64503a', blockTop: '#86704f', voidFill: '#080604',
   };
 
@@ -198,7 +198,7 @@
       const px = x * s + (0.15 + rand(x, y, 30 + k) * 0.7) * s, py = y * s + (0.15 + rand(x, y, 40 + k) * 0.7) * s;
       ctx.beginPath(); ctx.arc(px, py, s * (0.04 + rand(x, y, 50 + k) * 0.05), 0, Math.PI * 2); ctx.fill();
     }
-    ctx.strokeStyle = 'rgba(160,190,170,.22)'; ctx.lineWidth = Math.max(1, s / 30);
+    ctx.strokeStyle = 'rgba(170,215,210,.45)'; ctx.lineWidth = Math.max(1, s / 24);
     ctx.beginPath();
     const wy = y * s + s * (0.3 + rand(x, y, 6) * 0.4);
     ctx.moveTo(x * s + s * 0.15, wy);
@@ -282,7 +282,7 @@
   }
 
   function ringColor(v) {
-    if (v.ring === null) return 'var(--accent)';
+    if (v.ring === null) return 'var(--ink-dim)';     // no HP known: a neutral ring, not "near death"
     if (v.pc) return v.ring > 0.5 ? 'var(--hp)' : v.ring > 0.25 ? '#e0b44a' : 'var(--hp-low)';
     return v.state === 'healthy' ? 'var(--hp)' : v.state === 'bloodied' ? '#e0b44a' : 'var(--hp-low)';
   }
@@ -307,7 +307,8 @@
     } else if (img || face.textContent !== v.initials) {
       face.textContent = v.initials;
     }
-    face.style.fontSize = Math.max(9, Math.floor(px * 0.34)) + 'px';
+    // Sized for the couch (D8): as large as the square allows.
+    face.style.fontSize = Math.max(10, Math.floor(px * 0.42)) + 'px';
     const fill = el.querySelector('.ring .fill');
     const frac = v.ring === null ? 1 : v.ring;
     fill.setAttribute('stroke-dasharray', `${(frac * 100).toFixed(1)} 100`);
@@ -315,11 +316,12 @@
     const icons = el.querySelector('.icons');
     const iconHtml = v.icons.map((i) => `<span class="ic" data-cond="${i.name.replace(/[^a-z_-]/g, '')}">${i.glyph}</span>`).join('');
     if (icons.innerHTML !== iconHtml) icons.innerHTML = iconHtml;
-    icons.style.fontSize = Math.max(9, Math.floor(s * 0.26)) + 'px';
+    icons.style.fontSize = Math.max(10, Math.floor(s * 0.34)) + 'px';
     const hp = el.querySelector('.hp');
     hp.textContent = v.hpLabel || '';
-    hp.hidden = !v.hpLabel;
-    hp.style.fontSize = Math.max(10, Math.floor(s * 0.3)) + 'px';
+    // On a tiny board (a side panel) the label would cover the next squares.
+    hp.hidden = !v.hpLabel || s < 22;
+    hp.style.fontSize = Math.max(11, Math.floor(s * 0.4)) + 'px';
   }
 
   function newToken(name) {
@@ -419,16 +421,27 @@
     ctx.setTransform(f.dpr, 0, 0, f.dpr, 0, 0);
     ctx.clearRect(0, 0, W * s, H * s);
     if (fogv) {
-      // A soft edge: each fogged square is drawn a little larger and blurred.
-      try { ctx.filter = `blur(${Math.max(1, Math.round(s * 0.12))}px)`; } catch (_) {}
+      // Paint every fogged square sharp on a scratch canvas (unseen squares
+      // fully opaque, so nothing of an unseen room shows), then blur the
+      // whole picture once onto the fog canvas for a soft edge.
+      const off = document.createElement('canvas');
+      off.width = back.width; off.height = back.height;
+      const o = off.getContext('2d');
+      o.setTransform(f.dpr, 0, 0, f.dpr, 0, 0);
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
           const k = x + ',' + y;
           if (fogv.visible.has(k)) continue;
-          ctx.fillStyle = fogv.seen.has(k) ? 'rgba(6,4,3,.6)' : 'rgb(6,4,3)';
-          ctx.fillRect(x * s - 1, y * s - 1, s + 2, s + 2);
+          o.fillStyle = fogv.seen.has(k) ? 'rgba(6,4,3,.6)' : 'rgb(6,4,3)';
+          // squares on the map's edge reach past it, so the blur keeps them dark
+          const x0 = x === 0 ? -s : x * s, y0 = y === 0 ? -s : y * s;
+          const x1 = x === W - 1 ? (x + 2) * s : (x + 1) * s, y1 = y === H - 1 ? (y + 2) * s : (y + 1) * s;
+          o.fillRect(x0, y0, x1 - x0, y1 - y0);
         }
       }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      try { ctx.filter = `blur(${Math.max(1, Math.round(s * 0.12 * f.dpr))}px)`; } catch (_) {}
+      ctx.drawImage(off, 0, 0);
       try { ctx.filter = 'none'; } catch (_) {}
     }
     if (instant) { back.style.transition = 'none'; front.style.transition = 'none'; }
