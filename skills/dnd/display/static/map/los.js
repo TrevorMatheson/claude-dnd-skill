@@ -23,23 +23,23 @@
     return ch === undefined ? undefined : ch;
   }
 
-  // Walk the squares a centre-to-centre ray from (x0,y0) to (x1,y1) passes
-  // through (Amanatides & Woo). True when no blocker stands strictly between
-  // them. A ray through the exact corner of two diagonal blockers is stopped,
-  // as movement is (battlemap.py: no squeezing between two wall squares).
-  function clear(cells, x0, y0, x1, y1) {
-    const dx = x1 - x0, dy = y1 - y0;
+  // Walk the squares a ray from point (ax,ay) to point (bx,by) passes through
+  // (Amanatides & Woo), starting in square (x0,y0). True when it reaches
+  // square (x1,y1) with no blocker on the way. A ray through the exact corner
+  // of two diagonal blockers is stopped, as movement is (battlemap.py: no
+  // squeezing between two wall squares).
+  function clear(cells, ax, ay, bx, by, x1, y1) {
+    const dx = bx - ax, dy = by - ay;
     const sx = Math.sign(dx), sy = Math.sign(dy);
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-    // Parametric distance to the next vertical / horizontal grid line,
-    // in units of the whole ray (0..1), from the square's centre.
-    const tdx = adx ? 1 / adx : Infinity, tdy = ady ? 1 / ady : Infinity;
-    let tmx = adx ? 0.5 / adx : Infinity, tmy = ady ? 0.5 / ady : Infinity;
-    let x = x0, y = y0;
+    let x = Math.floor(ax), y = Math.floor(ay);
+    const tdx = dx ? Math.abs(1 / dx) : Infinity, tdy = dy ? Math.abs(1 / dy) : Infinity;
+    let tmx = dx ? ((sx > 0 ? x + 1 - ax : ax - x) * tdx) : Infinity;
+    let tmy = dy ? ((sy > 0 ? y + 1 - ay : ay - y) * tdy) : Infinity;
     const EPS = 1e-9;
-    while (true) {
+    for (let guard = 0; guard < 400; guard++) {
+      if (x === x1 && y === y1) return true;
+      if (Math.min(tmx, tmy) > 1 + EPS) return false;     // ends short of the target
       if (Math.abs(tmx - tmy) < EPS) {
-        // Through a corner: both side squares blocking stops the ray.
         if (BLOCKS(cellAt(cells, x + sx, y)) && BLOCKS(cellAt(cells, x, y + sy))) return false;
         x += sx; y += sy; tmx += tdx; tmy += tdy;
       } else if (tmx < tmy) {
@@ -50,10 +50,27 @@
       if (x === x1 && y === y1) return true;
       if (BLOCKS(cellAt(cells, x, y))) return false;
     }
+    return false;
   }
 
-  // Every square visible from (x, y): open squares with a clear ray, and the
-  // first blocker a ray meets (so a room's walls show).
+  // Points a PC can look from inside its square: the centre, then near each
+  // corner (a PC in a doorway leans to see into the room). Lines end at the
+  // target square's centre, as the plan's centre-to-centre rule has it.
+  const SAMPLES = [[0.5, 0.5], [0.12, 0.12], [0.88, 0.12], [0.12, 0.88], [0.88, 0.88]];
+  const NB8 = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+
+  function seesSquare(cells, x, y, tx, ty) {
+    for (const [ox, oy] of SAMPLES) {
+      if (clear(cells, x + ox, y + oy, tx + 0.5, ty + 0.5, tx, ty)) return true;
+    }
+    return false;
+  }
+
+  // Every square visible from (x, y): squares with a clear line from some
+  // point of the PC's square to some point of theirs, and the first blocker
+  // such a line meets (so a room's walls show). Centre-to-centre rays find
+  // most of it at once; the rest is grown from the edge of what is visible,
+  // so far-off dark squares never cost the slower test.
   function visibleFrom(cells, x, y) {
     if (!Array.isArray(cells)) return new Set();
     if (memoCells !== cells) { memoCells = cells; memo = new Map(); }
@@ -68,7 +85,32 @@
       for (let ty = 0; ty < H; ty++) {
         for (let tx = 0; tx < W; tx++) {
           if (tx === x && ty === y) continue;
-          if (clear(cells, x, y, tx, ty)) out.add(key(tx, ty));
+          if (clear(cells, x + 0.5, y + 0.5, tx + 0.5, ty + 0.5, tx, ty)) out.add(key(tx, ty));
+        }
+      }
+      const tried = new Set(out);
+      const queue = [...out];
+      while (queue.length) {
+        const [cx, cy] = queue.pop().split(',').map(Number);
+        if (BLOCKS(cellAt(cells, cx, cy)) && !(cx === x && cy === y)) continue;   // look past open squares only
+        for (const [dx, dy] of NB8) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const nk = key(nx, ny);
+          if (tried.has(nk)) continue;
+          tried.add(nk);
+          if (seesSquare(cells, x, y, nx, ny)) { out.add(nk); queue.push(nk); }
+        }
+      }
+      // A wall or the map's edge next to a visible open square shows too, so
+      // a lit room shows all its walls, corners included.
+      for (const vk of [...out]) {
+        const [vx, vy] = vk.split(',').map(Number);
+        if (BLOCKS(cellAt(cells, vx, vy))) continue;
+        for (const [dx, dy] of NB8) {
+          const nx = vx + dx, ny = vy + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          if (BLOCKS(cellAt(cells, nx, ny))) out.add(key(nx, ny));
         }
       }
     }

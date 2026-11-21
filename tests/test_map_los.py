@@ -396,3 +396,42 @@ class TestTvLoadsLos(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TestSightFindings(unittest.TestCase):
+    """QA verify S8: walls of a lit room stayed dark down a long wall, and a
+    PC in a doorway had blind spots in the room it was stepping into."""
+
+    def _run(self, body):
+        script = ("const L = require(%s);\nconst has = (s, x, y) => (s instanceof Set ? s : new Set(s)).has(x + ',' + y);\n"
+                  % json.dumps(str(DISPLAY / "static" / "map" / "los.js"))) + body
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(script)
+            path = f.name
+        r = subprocess.run([NODE, path], capture_output=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_long_room_walls_visible(self):
+        r = self._run("""
+const v = L.visibleFrom(['##############','#............#','#............#','#............#','##############'], 1, 2);
+const miss = [];
+for (let x = 0; x < 14; x++) { if (!has(v, x, 0)) miss.push([x, 0]); if (!has(v, x, 4)) miss.push([x, 4]); }
+console.log(JSON.stringify(miss));
+""")
+        self.assertEqual(r, [], "walls of a fully lit room must show")
+
+    def test_doorway_sees_into_room(self):
+        r = self._run("""
+const v = L.visibleFrom(['#######','#.....#','####.##','   #.# '], 4, 2);
+console.log(JSON.stringify([has(v, 1, 1), has(v, 2, 1), has(v, 5, 1)]));
+""")
+        self.assertEqual(r, [True, True, True])
+
+    def test_wall_still_hides_the_next_room(self):
+        r = self._run("""
+const v = L.visibleFrom(['#########','#...#...#','#...#...#','#########'], 1, 1);
+console.log(JSON.stringify([has(v, 5, 1), has(v, 6, 2), has(v, 4, 1)]));
+""")
+        self.assertEqual(r, [False, False, True])
