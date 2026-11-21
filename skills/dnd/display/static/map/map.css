@@ -103,23 +103,28 @@
   85% { opacity: 1; transform: translate(var(--dx), var(--dy)); }
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
 }
-/* outcomes at the target: a hit flashes, a melee miss whiffs, a shot glances off */
+/* outcomes at the target: a hit flashes, a melee miss whiffs, a shot glances
+   off. Each scales and moves around its own centre (fill-box), never the
+   board's. */
+.map-fx .atk .flash, .map-fx .atk .whiff, .map-fx .atk .deflect { transform-box: fill-box; transform-origin: center; }
 .map-fx .flash circle { fill: rgba(255, 238, 200, .75); }
 .map-fx .flash line { stroke: #fff2c8; stroke-width: 3; stroke-linecap: round; }
 .map-fx .atk .flash { animation-name: bm-flash; }
+/* peaks as an arrow or bolt arrives (85% of its flight) or the blade lands */
 @keyframes bm-flash {
-  0%, 55% { opacity: 0; transform: scale(.3); }
-  70% { opacity: 1; transform: scale(1); }
+  0%, 74% { opacity: 0; transform: scale(.3); }
+  86% { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.25); }
 }
 .map-fx .whiff path { fill: none; stroke: rgba(241, 235, 225, .8); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 4 5; }
 .map-fx .atk .whiff { animation-name: bm-whiff; }
 @keyframes bm-whiff {
-  0%, 50% { opacity: 0; transform: translateX(-30%); }
+  0%, 50% { opacity: 0; transform: translateX(-25%); }
   75% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(30%); }
+  100% { opacity: 0; transform: translateX(25%); }
 }
-.map-fx .deflect line { stroke: #ffd27a; stroke-width: 2.5; stroke-linecap: round; }
+.map-fx .deflect line { stroke: #b9d3ea; stroke-width: 2.5; stroke-linecap: round; }
+.map-fx .deflect .ricochet { fill: none; stroke: rgba(185, 211, 234, .8); stroke-width: 2; stroke-dasharray: 3 4; }
 .map-fx .atk .deflect { animation-name: bm-deflect; }
 @keyframes bm-deflect {
   0%, 70% { opacity: 0; transform: scale(.4) rotate(0deg); }
@@ -128,6 +133,6 @@
 }
 /* the target token itself: a flash on a hit, a dodge on a miss */
 .bm-token.atk-hit .face { animation: bm-tok-hit var(--atk-ms, 650ms) ease-out var(--atk-delay, 0ms) both; }
-@keyframes bm-tok-hit { 0%, 55% { filter: none; } 70% { filter: brightness(2.2) saturate(.4); } 100% { filter: none; } }
+@keyframes bm-tok-hit { 0%, 74% { filter: none; } 86% { filter: brightness(2.2) saturate(.4); } 100% { filter: none; } }
 .bm-token.atk-whiff .face, .bm-token.atk-deflect .face { animation: bm-tok-dodge var(--atk-ms, 650ms) ease-out var(--atk-delay, 0ms) both; }
 @keyframes bm-tok-dodge { 0%, 55% { translate: 0 0; } 72% { translate: 12% -6%; } 100% { translate: 0 0; } }

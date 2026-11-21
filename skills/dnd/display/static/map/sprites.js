@@ -91,7 +91,13 @@
         + `<path class="trail" d="M${n2(-s * 0.2)} ${n2(-s * 0.75)} A${n2(s * 0.8)} ${n2(s * 0.8)} 0 0 1 ${n2(-s * 0.2)} ${n2(s * 0.75)}"/>`
         + '</g></g>';
     } else if (item.sprite === 'arrow' || item.sprite === 'bolt') {
-      const end = T || [F[0] + s * 3, F[1]];
+      let end = T || [F[0] + s * 3, F[1]];
+      // A shot that misses glances off short of the target's disc.
+      if (T && item.outcome === 'deflect') {
+        const L = Math.hypot(T[0] - F[0], T[1] - F[1]) || 1;
+        const k = Math.max(0, (L - s * 0.5) / L);
+        end = [F[0] + (T[0] - F[0]) * k, F[1] + (T[1] - F[1]) * k];
+      }
       const dx = n2(end[0] - F[0]), dy = n2(end[1] - F[1]);
       const ang = Math.atan2(dy, dx) * 180 / Math.PI;
       const fly = `${style};--dx:${dx}px;--dy:${dy}px`;
@@ -119,8 +125,11 @@
           + `<path d="M${n2(-r * 0.8)} ${n2(r * 0.15)} q${n2(r * 0.8)} ${n2(-r * 0.7)} ${n2(r * 1.6)} 0"/>`
           + '</g></g>';
       } else {
-        body += `<g transform="translate(${T[0]} ${T[1]})"><g class="deflect" style="${o}">`
-          + [20, 70, 160, 250].map((a) => `<line x1="${n2(r * 0.3)}" y1="0" x2="${n2(r * 0.95)}" y2="0" transform="rotate(${a})"/>`).join('')
+        // cold sparks where the shot stopped, and the shot skittering away
+        const ang = F ? Math.atan2(T[1] - F[1], T[0] - F[0]) * 180 / Math.PI : 0;
+        body += `<g transform="translate(${T[0]} ${T[1]}) rotate(${n2(ang)})"><g class="deflect" style="${o}">`
+          + [150, 180, 210].map((a) => `<line x1="${n2(-r * 0.95)}" y1="0" x2="${n2(-r * 1.45)}" y2="0" transform="rotate(${a - 180} ${n2(-r * 0.9)} 0)"/>`).join('')
+          + `<path class="ricochet" d="M${n2(-r * 0.9)} 0 l${n2(r * 0.5)} ${n2(-r * 0.9)}"/>`
           + '</g></g>';
       }
     }
