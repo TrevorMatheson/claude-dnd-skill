@@ -698,6 +698,7 @@ def _apply_turn_effects(turn: dict, blocks: list) -> "tuple":
         raise ValueError("battle-map effects need a campaign: add \"campaign\" to the turn or load one first")
     cdir = find_campaign(camp)
     out = []
+    where = "the map"
     try:
         m = bm.load(cdir)
         for i, fx in enumerate(per_block):
@@ -772,7 +773,7 @@ def _apply_turn_effects(turn: dict, blocks: list) -> "tuple":
     except (bm.MapError, KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ValueError) and not isinstance(exc, bm.MapError) and str(exc).startswith("block "):
             raise
-        raise ValueError(f"battle-map effect refused: {exc}")
+        raise ValueError(f"battle-map effect refused ({where}): {exc}")
     bm.save(cdir, m)
     try:
         import combat

@@ -163,17 +163,19 @@ def find_path(m: dict, start: tuple, goal: tuple, mover: str = "", kind: str = "
     occ = _occupied(m, mover)
     if goal in occ:
         return None
-    best = {start: 0}
+    # Equal-cost routes are told apart by their number of diagonal steps, so
+    # a straight walk comes back straight (a sliding token doesn't wobble).
+    best = {start: (0, 0)}
     prev = {}
-    heap = [(0, start)]
+    heap = [(0, 0, start)]
     while heap:
-        cost, (x, y) = heapq.heappop(heap)
+        cost, diag, (x, y) = heapq.heappop(heap)
         if (x, y) == goal:
             path = [goal]
             while path[-1] != start:
                 path.append(prev[path[-1]])
             return cost, path[::-1]
-        if cost > best.get((x, y), 1 << 30):
+        if (cost, diag) > best.get((x, y), (1 << 30, 0)):
             continue
         for dx, dy in _STEPS:
             nx, ny = x + dx, y + dy
@@ -187,11 +189,11 @@ def find_path(m: dict, start: tuple, goal: tuple, mover: str = "", kind: str = "
                     and m["tokens"][other].get("kind") != kind):
                 continue      # can't move through a hostile creature's space
             step = FT * (2 if c in DIFFICULT else 1)
-            nc = cost + step
-            if nc < best.get((nx, ny), 1 << 30):
-                best[(nx, ny)] = nc
+            key = (cost + step, diag + (1 if dx and dy else 0))
+            if key < best.get((nx, ny), (1 << 30, 0)):
+                best[(nx, ny)] = key
                 prev[(nx, ny)] = (x, y)
-                heapq.heappush(heap, (nc, (nx, ny)))
+                heapq.heappush(heap, (key[0], key[1], (nx, ny)))
     return None
 
 

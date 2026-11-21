@@ -440,3 +440,19 @@ class TestDetourByCreatures(unittest.TestCase):
         self.assertEqual(r["detour_by"], "creatures")
         self.assertIn("creature", r["message"])
         self.assertIn("(1,1)", bm.check_move(m, "Havoc", 1, 3)["message"])
+
+
+class TestStraightPaths(unittest.TestCase):
+    """QA verify S6: equal-cost routes zig-zagged ((1,5)->(2,4)->(3,5)), so a
+    sliding token would wobble. Prefer the route with fewer diagonal steps."""
+
+    def test_straight_walk_is_straight(self):
+        m = bm.new_map(10, 8)
+        bm.place(m, "Mira", 1, 5, kind="pc")
+        cost, path = bm.find_path(m, (1, 5), (3, 5), "Mira", "pc")
+        self.assertEqual(cost, 10)
+        self.assertEqual([tuple(p) for p in path], [(1, 5), (2, 5), (3, 5)])
+
+    def test_cost_unchanged(self):
+        m = bm.new_map(10, 8)
+        self.assertEqual(bm.find_path(m, (0, 0), (5, 2))[0], 25)
