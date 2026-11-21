@@ -435,3 +435,35 @@ const v = L.visibleFrom(['#########','#...#...#','#...#...#','#########'], 1, 1)
 console.log(JSON.stringify([has(v, 5, 1), has(v, 6, 2), has(v, 4, 1)]));
 """)
         self.assertEqual(r, [False, False, True])
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TestSightFollowUps(TestSightFindings):
+    """QA verify S9: a doorway in a lit room's wall showed as a dark notch,
+    and fog jumped to a sliding PC's end square instead of following it."""
+
+    def test_doorway_in_lit_wall_visible(self):
+        r = self._run("""
+const cells = ['#####D#####', '#.........#', '#.........#', '#.........#', '###########'];
+const v = L.visibleFrom(cells, 1, 3);
+console.log(JSON.stringify([has(v, 5, 0), has(v, 4, 0), has(v, 6, 0)]));
+""")
+        self.assertEqual(r, [True, True, True])
+
+    def test_fog_follows_the_slide(self):
+        script = ("const M = require(%s);\n" % json.dumps(str(DISPLAY / "static" / "tv" / "map.js"))) + """
+const path = [[1, 1], [2, 1], [3, 1], [4, 1], [5, 1]];
+const at = (f) => M.alongPath(path, f);
+console.log(JSON.stringify([at(0), at(0.5), at(0.99), at(1), at(2), at(-1)]));
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(script)
+            path = f.name
+        r = subprocess.run([NODE, path], capture_output=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual(got[0], [1, 1])
+        self.assertEqual(got[1], [3, 1])
+        self.assertEqual(got[3], [5, 1])
+        self.assertEqual(got[4], [5, 1])
+        self.assertEqual(got[5], [1, 1])

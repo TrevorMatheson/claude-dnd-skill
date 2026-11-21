@@ -16,6 +16,20 @@
   }
 
   function board() { return root.TV && root.TV.board; }
+
+  // The square a sliding token has reached `frac` of the way along `path`.
+  function alongPath(path, frac) {
+    if (!Array.isArray(path) || !path.length) return null;
+    const f = Math.max(0, Math.min(1, Number(frac) || 0));
+    const p = path[Math.min(path.length - 1, Math.floor(f * (path.length - 1) + 1e-9))];
+    return [p[0], p[1]];
+  }
+
+  // When each slide began (by its key), so fog can follow a sliding PC
+  // square by square instead of jumping to where it ends.
+  const slideStarts = new Map();
+  const SLIDE_MS = 600;
+  let fogTimer = null;
   function los() { return root.TV && root.TV.los; }
 
   // Per box: the layout it shows (a stable cells array, so line of sight is
@@ -91,7 +105,27 @@
       tokens = st.tokens; slides = st.slides || {}; area = st.area || null; attacks = st.attacks || [];
       settled = !t.pendingCount();
     }
-    const seen = sight(box, m, tokens, settled);
+    // Fog follows a sliding PC along its path (D9 + D12): the eyes are
+    // where the token has got to, and the map redraws as it goes.
+    const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    let sliding = false;
+    const eyes = tokens.map((tok) => {
+      const sl = slides[tok.name];
+      if (!sl || tok.kind !== 'pc') return tok;
+      const k = sl.key != null ? sl.key : JSON.stringify(sl.path || sl);
+      if (!slideStarts.has(k)) slideStarts.set(k, nowMs);
+      const frac = (nowMs - slideStarts.get(k)) / SLIDE_MS;
+      if (frac < 1) sliding = true;
+      const sq = alongPath(sl.path || sl, frac);
+      return sq ? Object.assign({}, tok, { x: sq[0], y: sq[1] }) : tok;
+    });
+    if (slideStarts.size > 50) slideStarts.clear();
+    if (sliding && !fogTimer && onChange) {
+      fogTimer = setTimeout(() => { fogTimer = null; if (onChange) onChange(); }, 90);
+    }
+    const seenAt = sight(box, m, eyes, settled);
+    const shownNames = new Set(seenAt.tokens.map((x) => String(x.name)));
+    const seen = { fog: seenAt.fog, tokens: tokens.filter((x) => shownNames.has(String(x.name))) };
     drawnNames = new Set(seen.tokens.map((x) => String(x.name)));
     B.render(box, {
       map: m,
@@ -106,7 +140,7 @@
     });
   }
 
-  const api = { canvasSize, draw, sight, blockArrived, blockStarted, blockSkipped, flushAll, setOnChange };
+  const api = { canvasSize, alongPath, draw, sight, blockArrived, blockStarted, blockSkipped, flushAll, setOnChange };
   root.TV = root.TV || {};
   root.TV.map = api;
   if (typeof module !== 'undefined') module.exports = api;

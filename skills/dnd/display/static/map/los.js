@@ -23,12 +23,12 @@
     const H = cells.length;
     let W = 0;
     for (const r of cells) W = Math.max(W, String(r).length);
-    const b = new Uint8Array(W * H);
+    const b = new Uint8Array(W * H), door = new Uint8Array(W * H);
     for (let y = 0; y < H; y++) {
       const row = String(cells[y]);
-      for (let x = 0; x < W; x++) b[y * W + x] = BLOCKS(row[x]) ? 1 : 0;
+      for (let x = 0; x < W; x++) { b[y * W + x] = BLOCKS(row[x]) ? 1 : 0; door[y * W + x] = row[x] === 'D' ? 1 : 0; }
     }
-    gridCells = cells; grid = { W, H, b };
+    gridCells = cells; grid = { W, H, b, door };
     return grid;
   }
   function blk(g, x, y) { return x < 0 || y < 0 || x >= g.W || y >= g.H ? 1 : g.b[y * g.W + x]; }
@@ -112,14 +112,14 @@
           }
         }
       }
-      // A wall or the map's edge next to a visible open square shows too, so
-      // a lit room shows all its walls, corners included.
+      // A wall, a doorway or the map's edge next to a visible open square
+      // shows too, so a lit room shows all its walls, doors and corners.
       for (let i = 0; i < W * H; i++) {
         if (vis[i] !== 1 || g.b[i]) continue;
         const qx = i % W, qy = (i - qx) / W;
         for (const [dx, dy] of NB8) {
           const nx = qx + dx, ny = qy + dy;
-          if (nx >= 0 && ny >= 0 && nx < W && ny < H && g.b[ny * W + nx]) vis[ny * W + nx] = 1;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && (g.b[ny * W + nx] || g.door[ny * W + nx])) vis[ny * W + nx] = 1;
         }
       }
       for (let i = 0; i < W * H; i++) if (vis[i] === 1) out.add((i % W) + ',' + ((i - (i % W)) / W));
