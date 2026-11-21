@@ -566,7 +566,7 @@ def _map_cmd(a) -> int:
             bm.place(m, a.name, a.x, a.y, kind="pc" if a.pc else "npc", speed=a.speed, size=a.size,
                      hidden=a.hidden, portrait=a.portrait)
             bm.save(camp, m)
-            print(f"{a.name} placed at ({a.x},{a.y}){' — hidden' if a.hidden else ''}.")
+            print(f"{a.name} placed at ({a.x},{a.y}){' (hidden)' if a.hidden else ''}.")
         elif a.cmd in ("hide", "reveal"):
             n, _ = bm.token(m, a.name)
             bm.set_hidden(m, n, a.cmd == "hide")

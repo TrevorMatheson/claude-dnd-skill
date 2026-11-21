@@ -297,8 +297,30 @@ def active_modifiers(campaign: str, entity_name: str, roll_type: str) -> list:
     return out
 
 
+#: The campaign this run works on (set by main), so a condition push can
+#: check the battle map for hidden tokens.
+_CAMPAIGN = None
+
+
+def _hidden_on_map(entity_name: str) -> bool:
+    """True when the campaign's battle map has this creature hidden (battle
+    map D10): nothing about it may reach a screen until it is revealed."""
+    if not _CAMPAIGN:
+        return False
+    try:
+        with open(os.path.join(str(_find_campaign(_CAMPAIGN)), "battlemap.json"), encoding="utf-8") as f:
+            toks = json.load(f).get("tokens") or {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(str(n).lower() == entity_name.lower() and isinstance(t, dict) and t.get("hidden")
+               for n, t in toks.items())
+
+
 def _push_conditions(entity_name: str, conditions: list[str]) -> None:
-    """Push condition list to display sidebar via push_stats.py."""
+    """Push condition list to display sidebar via push_stats.py (never for a
+    creature hidden on the battle map)."""
+    if _hidden_on_map(entity_name):
+        return
     cond_str = ",".join(conditions)
     try:
         subprocess.run(
@@ -723,6 +745,8 @@ def main() -> None:
                      help="Also reset death saves (never a dead character's)")
 
     args = p.parse_args()
+    global _CAMPAIGN
+    _CAMPAIGN = args.campaign
 
     if args.cmd == "effect":
         cmd_effect(args.campaign, args.action, args.entity,

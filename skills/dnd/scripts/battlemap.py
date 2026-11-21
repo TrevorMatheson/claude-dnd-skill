@@ -225,6 +225,7 @@ def place(m: dict, name: str, x: int, y: int, kind: str = "npc", speed: int = 30
         if n.lower() == name.lower():
             del m["tokens"][n]
     if portrait is not None and (not _PORTRAIT_RE.fullmatch(portrait) or ".." in portrait
+                                 or portrait.startswith("/")
                                  or not portrait.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))):
         raise MapError(f"portrait {portrait!r} must be an image path inside the campaign's maps/ "
                        "folder, e.g. maps/tokens/havoc.png")

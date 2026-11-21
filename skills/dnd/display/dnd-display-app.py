@@ -2369,7 +2369,7 @@ def _bm_hp_state(cur, mx):
 
 def _map_asset_ok(path) -> bool:
     """A picture path inside the campaign's maps/ folder (served by /map-image)."""
-    return (isinstance(path, str) and ".." not in path
+    return (isinstance(path, str) and ".." not in path and not path.startswith("/")
             and re.fullmatch(r"[\w\-./ ]{1,120}", path) is not None
             and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")))
 
