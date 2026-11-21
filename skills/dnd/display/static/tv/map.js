@@ -16,6 +16,37 @@
   }
 
   function board() { return root.TV && root.TV.board; }
+  function los() { return root.TV && root.TV.los; }
+
+  // Per box: the layout it shows (a stable cells array, so line of sight is
+  // memoised across payloads), the dim "seen earlier" squares, and how much
+  // of fog.trail they already include.
+  const boxes = new WeakMap();
+
+  // What the table may see of `m` with tokens at `tokens` (D9): the fog and
+  // the tokens to draw. `seen` is rebuilt from fog.trail when a map loads
+  // (first draw, reconnect, a new layout: D18), then grows with what the PCs
+  // see; `absorbTrail` adds squares seen from trail squares that arrived
+  // since (false while a move is still to play, so dim squares never run
+  // ahead of the story).
+  function sight(box, m, tokens, absorbTrail) {
+    const L = los();
+    if (!L) return { fog: null, tokens };
+    const ck = JSON.stringify([m.grid, m.cells]);
+    let st = boxes.get(box);
+    if (!st || st.ck !== ck) { st = { ck, cells: m.cells, seen: null, trailN: 0 }; boxes.set(box, st); }
+    const mm = Object.assign({}, m, { cells: st.cells });
+    const trail = (m.fog && Array.isArray(m.fog.trail)) ? m.fog.trail : [];
+    if (st.seen && absorbTrail && trail.length > st.trailN) {
+      for (const p of trail.slice(st.trailN)) {
+        if (Array.isArray(p) && p.length === 2) for (const k of L.visibleFrom(st.cells, p[0], p[1])) st.seen.add(k);
+      }
+    }
+    if (!st.seen || absorbTrail) st.trailN = trail.length;
+    const fog = L.fog(mm, tokens, st.seen);
+    st.seen = fog.seen;
+    return { fog, tokens: tokens.filter((t) => L.tokenShown(t, fog)) };
+  }
 
   // Draw stats.map into `box`. Cheap to call again: tiles are redrawn only
   // when the map or the box size changes.
@@ -26,16 +57,18 @@
     if (!m || !m.grid || !m.grid.w || !m.grid.h || !B) { box.innerHTML = ''; delete box.dataset.key; return; }
     if (box.dataset.aspect === 'grid') box.style.aspectRatio = `${m.grid.w} / ${m.grid.h}`;
     const to = (stats && stats.turn_order) || {};
+    const seen = sight(box, m, Array.isArray(m.tokens) ? m.tokens : [], true);
     B.render(box, {
       map: m,
-      tokens: Array.isArray(m.tokens) ? m.tokens : [],
+      tokens: seen.tokens,
+      fog: seen.fog,
       players: Array.isArray(stats.players) ? stats.players : [],
       current: to.current || null,
       mine: null,
     });
   }
 
-  const api = { canvasSize, draw };
+  const api = { canvasSize, draw, sight };
   root.TV = root.TV || {};
   root.TV.map = api;
   if (typeof module !== 'undefined') module.exports = api;

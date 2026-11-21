@@ -275,7 +275,7 @@
       board = document.createElement('div');
       board.className = 'map-board';
       board.innerHTML = '<canvas class="map-tiles"></canvas><canvas class="map-fog"></canvas>'
-        + '<div class="map-tokens"></div><svg class="map-fx" xmlns="' + SVGNS + '"></svg>';
+        + '<canvas class="map-fog map-fog-b"></canvas><div class="map-tokens"></div><svg class="map-fx" xmlns="' + SVGNS + '"></svg>';
       box.appendChild(board);
     }
     return board;
@@ -375,7 +375,7 @@
       svg.setAttribute('viewBox', `0 0 ${f.width} ${f.height}`);
       board.dataset.fogKey = '';
     }
-    if (root.TV && root.TV.board && root.TV.board.drawFog) root.TV.board.drawFog(board, m, f, view.fog || null);
+    drawFog(board, m, f, view.fog || null);
 
     const layer = board.querySelector('.map-tokens');
     const slides = view.slides || {};
@@ -400,6 +400,44 @@
     return f;
   }
 
+  // Fog (D9): dark where no PC can see, dim where one saw earlier, clear
+  // where one sees now. Two canvases take turns so a change crossfades
+  // (400 ms, map.css) instead of popping.
+  function drawFog(board, m, f, fogv) {
+    const sig = fogv ? [...fogv.visible].sort().join(';') + '|' + [...fogv.seen].sort().join(';') + '|' + f.size : 'none|' + f.size;
+    if (board.dataset.fogKey === sig) return;
+    // A fresh board (first draw, new map, resize) shows its fog at once: a
+    // crossfade from nothing would flash the whole map, monsters' rooms too.
+    const instant = !board.dataset.fogKey;
+    board.dataset.fogKey = sig;
+    const canvases = board.querySelectorAll('canvas.map-fog');
+    if (canvases.length < 2) return;
+    const front = board.dataset.fogFront === 'b' ? canvases[1] : canvases[0];
+    const back = front === canvases[0] ? canvases[1] : canvases[0];
+    const ctx = back.getContext('2d');
+    const s = f.size, W = m.grid.w, H = m.grid.h;
+    ctx.setTransform(f.dpr, 0, 0, f.dpr, 0, 0);
+    ctx.clearRect(0, 0, W * s, H * s);
+    if (fogv) {
+      // A soft edge: each fogged square is drawn a little larger and blurred.
+      try { ctx.filter = `blur(${Math.max(1, Math.round(s * 0.12))}px)`; } catch (_) {}
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const k = x + ',' + y;
+          if (fogv.visible.has(k)) continue;
+          ctx.fillStyle = fogv.seen.has(k) ? 'rgba(6,4,3,.6)' : 'rgb(6,4,3)';
+          ctx.fillRect(x * s - 1, y * s - 1, s + 2, s + 2);
+        }
+      }
+      try { ctx.filter = 'none'; } catch (_) {}
+    }
+    if (instant) { back.style.transition = 'none'; front.style.transition = 'none'; }
+    back.style.opacity = '1';
+    front.style.opacity = '0';
+    if (instant) { void back.offsetWidth; back.style.transition = ''; front.style.transition = ''; }
+    board.dataset.fogFront = back === canvases[1] ? 'b' : 'a';
+  }
+
   // Slide a token square by square along `path` (Web Animations), ending at
   // its last square. Never longer than `ms`.
   function slide(el, path, s, ms) {
@@ -413,7 +451,7 @@
 
   const api = {
     fit, tileKind, tokenView, hpState, initials, conditionIcon, STEPS,
-    drawTiles, render, slide, tokenId, ensureBoard,
+    drawTiles, drawFog, render, slide, tokenId, ensureBoard,
   };
   root.TV = root.TV || {};
   root.TV.board = Object.assign(root.TV.board || {}, api);
