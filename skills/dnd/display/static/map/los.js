@@ -16,21 +16,31 @@
   // Memo: one result per origin for each cells array (a new map, a new array).
   let memoCells = null, memo = new Map();
 
-  function cellAt(cells, x, y) {
-    const row = cells[y];
-    if (row === undefined || x < 0) return undefined;
-    const ch = row[x];
-    return ch === undefined ? undefined : ch;
+  // The layout as a blocker grid (1 = wall or outside), built once per cells.
+  let gridCells = null, grid = null;
+  function blockGrid(cells) {
+    if (gridCells === cells && grid) return grid;
+    const H = cells.length;
+    let W = 0;
+    for (const r of cells) W = Math.max(W, String(r).length);
+    const b = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) {
+      const row = String(cells[y]);
+      for (let x = 0; x < W; x++) b[y * W + x] = BLOCKS(row[x]) ? 1 : 0;
+    }
+    gridCells = cells; grid = { W, H, b };
+    return grid;
   }
+  function blk(g, x, y) { return x < 0 || y < 0 || x >= g.W || y >= g.H ? 1 : g.b[y * g.W + x]; }
 
   // Walk the squares a ray from point (ax,ay) to point (bx,by) passes through
-  // (Amanatides & Woo), starting in square (x0,y0). True when it reaches
-  // square (x1,y1) with no blocker on the way. A ray through the exact corner
-  // of two diagonal blockers is stopped, as movement is (battlemap.py: no
-  // squeezing between two wall squares).
-  function clear(cells, ax, ay, bx, by, x1, y1) {
+  // (Amanatides & Woo), starting in the square holding (ax,ay). True when it
+  // reaches square (x1,y1) with no blocker on the way. A ray through the
+  // exact corner of two diagonal blockers is stopped, as movement is
+  // (battlemap.py: no squeezing between two wall squares).
+  function clear(g, ax, ay, bx, by, x1, y1) {
     const dx = bx - ax, dy = by - ay;
-    const sx = Math.sign(dx), sy = Math.sign(dy);
+    const sx = dx > 0 ? 1 : dx < 0 ? -1 : 0, sy = dy > 0 ? 1 : dy < 0 ? -1 : 0;
     let x = Math.floor(ax), y = Math.floor(ay);
     const tdx = dx ? Math.abs(1 / dx) : Infinity, tdy = dy ? Math.abs(1 / dy) : Infinity;
     let tmx = dx ? ((sx > 0 ? x + 1 - ax : ax - x) * tdx) : Infinity;
@@ -38,17 +48,18 @@
     const EPS = 1e-9;
     for (let guard = 0; guard < 400; guard++) {
       if (x === x1 && y === y1) return true;
-      if (Math.min(tmx, tmy) > 1 + EPS) return false;     // ends short of the target
-      if (Math.abs(tmx - tmy) < EPS) {
-        if (BLOCKS(cellAt(cells, x + sx, y)) && BLOCKS(cellAt(cells, x, y + sy))) return false;
+      if ((tmx < tmy ? tmx : tmy) > 1 + EPS) return false;     // ends short of the target
+      const d = tmx - tmy;
+      if (d < EPS && d > -EPS) {
+        if (blk(g, x + sx, y) && blk(g, x, y + sy)) return false;
         x += sx; y += sy; tmx += tdx; tmy += tdy;
-      } else if (tmx < tmy) {
+      } else if (d < 0) {
         x += sx; tmx += tdx;
       } else {
         y += sy; tmy += tdy;
       }
       if (x === x1 && y === y1) return true;
-      if (BLOCKS(cellAt(cells, x, y))) return false;
+      if (blk(g, x, y)) return false;
     }
     return false;
   }
@@ -59,60 +70,59 @@
   const SAMPLES = [[0.5, 0.5], [0.12, 0.12], [0.88, 0.12], [0.12, 0.88], [0.88, 0.88]];
   const NB8 = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
-  function seesSquare(cells, x, y, tx, ty) {
-    for (const [ox, oy] of SAMPLES) {
-      if (clear(cells, x + ox, y + oy, tx + 0.5, ty + 0.5, tx, ty)) return true;
-    }
-    return false;
-  }
-
   // Every square visible from (x, y): squares with a clear line from some
-  // point of the PC's square to some point of theirs, and the first blocker
-  // such a line meets (so a room's walls show). Centre-to-centre rays find
-  // most of it at once; the rest is grown from the edge of what is visible,
-  // so far-off dark squares never cost the slower test.
+  // point of the PC's square to their centre, and the first blocker such a
+  // line meets (so a room's walls show). Centre-to-centre rays find most of
+  // it at once; the rest is grown from the edge of what is visible, so
+  // far-off dark squares never cost the slower test.
   function visibleFrom(cells, x, y) {
     if (!Array.isArray(cells)) return new Set();
     if (memoCells !== cells) { memoCells = cells; memo = new Map(); }
     const k = key(x, y);
     if (memo.has(k)) return memo.get(k);
+    const g = blockGrid(cells);
+    const { W, H } = g;
     const out = new Set();
-    const H = cells.length;
-    let W = 0;
-    for (const r of cells) W = Math.max(W, String(r).length);
     if (y >= 0 && y < H && x >= 0 && x < W) {
-      out.add(k);
+      const vis = new Uint8Array(W * H);      // 1 visible, 2 tried and not
+      vis[y * W + x] = 1;
+      const cx0 = x + 0.5, cy0 = y + 0.5;
+      const queue = [];
       for (let ty = 0; ty < H; ty++) {
         for (let tx = 0; tx < W; tx++) {
-          if (tx === x && ty === y) continue;
-          if (clear(cells, x + 0.5, y + 0.5, tx + 0.5, ty + 0.5, tx, ty)) out.add(key(tx, ty));
+          const i = ty * W + tx;
+          if (i === y * W + x) { queue.push(i); continue; }
+          if (clear(g, cx0, cy0, tx + 0.5, ty + 0.5, tx, ty)) { vis[i] = 1; queue.push(i); }
         }
       }
-      const tried = new Set(out);
-      const queue = [...out];
       while (queue.length) {
-        const [cx, cy] = queue.pop().split(',').map(Number);
-        if (BLOCKS(cellAt(cells, cx, cy)) && !(cx === x && cy === y)) continue;   // look past open squares only
+        const i = queue.pop();
+        const qx = i % W, qy = (i - qx) / W;
+        if (g.b[i] && i !== y * W + x) continue;          // look past open squares only
         for (const [dx, dy] of NB8) {
-          const nx = cx + dx, ny = cy + dy;
+          const nx = qx + dx, ny = qy + dy;
           if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-          const nk = key(nx, ny);
-          if (tried.has(nk)) continue;
-          tried.add(nk);
-          if (seesSquare(cells, x, y, nx, ny)) { out.add(nk); queue.push(nk); }
+          const ni = ny * W + nx;
+          if (vis[ni]) continue;
+          vis[ni] = 2;
+          for (let s = 1; s < SAMPLES.length; s++) {
+            if (clear(g, x + SAMPLES[s][0], y + SAMPLES[s][1], nx + 0.5, ny + 0.5, nx, ny)) {
+              vis[ni] = 1; queue.push(ni); break;
+            }
+          }
         }
       }
       // A wall or the map's edge next to a visible open square shows too, so
       // a lit room shows all its walls, corners included.
-      for (const vk of [...out]) {
-        const [vx, vy] = vk.split(',').map(Number);
-        if (BLOCKS(cellAt(cells, vx, vy))) continue;
+      for (let i = 0; i < W * H; i++) {
+        if (vis[i] !== 1 || g.b[i]) continue;
+        const qx = i % W, qy = (i - qx) / W;
         for (const [dx, dy] of NB8) {
-          const nx = vx + dx, ny = vy + dy;
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-          if (BLOCKS(cellAt(cells, nx, ny))) out.add(key(nx, ny));
+          const nx = qx + dx, ny = qy + dy;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && g.b[ny * W + nx]) vis[ny * W + nx] = 1;
         }
       }
+      for (let i = 0; i < W * H; i++) if (vis[i] === 1) out.add((i % W) + ',' + ((i - (i % W)) / W));
     }
     memo.set(k, out);
     return out;
