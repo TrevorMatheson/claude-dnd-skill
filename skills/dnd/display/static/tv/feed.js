@@ -174,12 +174,28 @@
 
     const stateOf = (b) => reveal.get(b);
 
+    // The battle map plays a block's effects (map_fx) when the block starts
+    // and snaps them when it is skipped (battle-map spec D12, D17). The map
+    // can never stall or break the story: every call is fire-and-forget.
+    function mapHook(name, seq, arg) {
+      const m = opts.map || (root && root.TV && root.TV.map);
+      if (!m || typeof m[name] !== 'function' || typeof seq !== 'number') return;
+      try { m[name](seq, arg); } catch (err) {
+        if (typeof console !== 'undefined') console.error('tv feed: map ' + name + ' failed', err);
+      }
+    }
+
     function track(blocks) {
       for (const b of blocks) {
         if (reveal.has(b)) continue;
         const live = voice && !b.history;
         reveal.set(b, { key: nextKey++, shown: live ? '' : String(b.text || ''), started: !live, done: !live });
-        if (live) voice.enqueue(b);
+        if (live) {
+          if (b.map_fx) mapHook('blockArrived', b.seq, b.map_fx);
+          voice.enqueue(b);
+        } else {
+          mapHook('blockSkipped', b.seq);
+        }
       }
     }
 
@@ -189,6 +205,7 @@
       if (voice) voice.reset();
       for (const b of model.view().blocks) {
         const st = stateOf(b);
+        if (st && !st.started) mapHook('blockSkipped', b.seq);
         if (st) { st.started = true; st.done = true; st.shown = String(b.text || ''); }
       }
       version++;
@@ -217,7 +234,11 @@
       const finish = () => {
         if (st.shown.length >= full.length) { st.done = true; st.shown = full; version++; render(true); }
       };
-      if (!st.started) { st.started = true; version++; render(true); }
+      if (!st.started) {
+        st.started = true; version++;
+        mapHook('blockStarted', b.seq);
+        render(true);
+      }
       const speaks = blockClass(b) === 'narr' || blockClass(b) === 'npc';
       const ms = seg.msPerChar || (speaks ? CHAR_MS : 0);
       if (seg.instant || !ms) { st.shown += seg.text; finish(); return Promise.resolve(); }

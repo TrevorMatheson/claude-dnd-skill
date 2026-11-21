@@ -48,6 +48,27 @@
     return { fog, tokens: tokens.filter((t) => L.tokenShown(t, fog)) };
   }
 
+  // The effect timeline (static/map/fx.js): moves and spell areas play when
+  // their narration block starts (D12, D14), skipped blocks snap (D17).
+  let fx = null, lastMap, onChange = null;
+  function timeline() {
+    if (!fx && root.TV && root.TV.fx) {
+      fx = root.TV.fx.makeFx({ onChange: () => { if (onChange) { try { onChange(); } catch (_) {} } } });
+    }
+    return fx;
+  }
+  function call(name, a, b) {
+    const t = timeline();
+    if (t) { try { t[name](a, b); } catch (err) { console.error('tv: map ' + name + ' failed', err); } }
+  }
+  // Called by the feed (fire-and-forget; feed.js wraps each call too).
+  function blockArrived(seq, mapFx) { call('arrive', seq, mapFx); }
+  function blockStarted(seq) { call('start', seq); }
+  function blockSkipped(seq) { call('skip', seq); }
+  // A backgrounded tab returns, rewind, clear or a reconnect: jump to now.
+  function flushAll() { call('flushAll'); }
+  function setOnChange(cb) { onChange = cb; }
+
   // Draw stats.map into `box`. Cheap to call again: tiles are redrawn only
   // when the map or the box size changes.
   function draw(box, stats) {
@@ -57,18 +78,28 @@
     if (!m || !m.grid || !m.grid.w || !m.grid.h || !B) { box.innerHTML = ''; delete box.dataset.key; return; }
     if (box.dataset.aspect === 'grid') box.style.aspectRatio = `${m.grid.w} / ${m.grid.h}`;
     const to = (stats && stats.turn_order) || {};
-    const seen = sight(box, m, Array.isArray(m.tokens) ? m.tokens : [], true);
+    let tokens = Array.isArray(m.tokens) ? m.tokens : [], slides = {}, area = null, settled = true;
+    const t = timeline();
+    if (t) {
+      if (m !== lastMap) { lastMap = m; t.setTarget(m); }
+      const st = t.shownState();
+      tokens = st.tokens; slides = st.slides || {}; area = st.area || null;
+      settled = !t.pendingCount();
+    }
+    const seen = sight(box, m, tokens, settled);
     B.render(box, {
       map: m,
       tokens: seen.tokens,
       fog: seen.fog,
+      slides,
+      area,
       players: Array.isArray(stats.players) ? stats.players : [],
       current: to.current || null,
       mine: null,
     });
   }
 
-  const api = { canvasSize, draw, sight };
+  const api = { canvasSize, draw, sight, blockArrived, blockStarted, blockSkipped, flushAll, setOnChange };
   root.TV = root.TV || {};
   root.TV.map = api;
   if (typeof module !== 'undefined') module.exports = api;

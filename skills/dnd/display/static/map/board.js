@@ -390,16 +390,58 @@
       const fresh = !el;
       if (fresh) { el = newToken(String(t.name)); layer.appendChild(el); }
       updateToken(el, tokenView(t, view.players, view.current, view.mine), s);
-      const path = slides[t.name];
-      if (!fresh && Array.isArray(path) && path.length > 1 && typeof el.animate === 'function') {
+      // A slide plays once per move (its key); redraws while it runs leave it be.
+      const sl = slides[t.name];
+      const path = sl && (Array.isArray(sl) ? sl : sl.path);
+      const skey = sl && !Array.isArray(sl) ? sl.key : JSON.stringify(path);
+      if (sl && el._slideKey === skey) {
+        // already sliding (or slid) along this path
+      } else if (!fresh && Array.isArray(path) && path.length > 1 && typeof el.animate === 'function') {
+        el._slideKey = skey;
         slide(el, path, s, view.slideMs || 600);
       } else {
+        el._slideKey = sl ? skey : null;
         if (el._anim) { try { el._anim.cancel(); } catch (_) {} el._anim = null; }
         place(el, t.x || 0, t.y || 0, s);
       }
     }
     for (const el of [...layer.children]) if (!keep.has(el.id)) el.remove();
+    drawArea(board, view.area || null, s);
     return f;
+  }
+
+  // A spell area (D14): its squares softly filled, the outer edge of the
+  // shape outlined in the accent, and its label; it fades when it ends.
+  function drawArea(board, area, s) {
+    const svg = board.querySelector('svg.map-fx');
+    if (!svg) return;
+    const key = area ? String(area.key || '') + '|' + s + '|' + JSON.stringify(area.squares) : '';
+    const cur = svg.querySelector('g.area:not(.leaving)');
+    if (cur && cur.dataset.key === key) return;
+    if (cur) {
+      cur.classList.add('leaving');
+      setTimeout(() => cur.remove(), 650);
+    }
+    if (!area || !Array.isArray(area.squares) || !area.squares.length) return;
+    const set = new Set(area.squares.map((p) => p[0] + ',' + p[1]));
+    let rects = '', d = '';
+    let top = Infinity, sumX = 0, n = 0;
+    for (const [x, y] of area.squares) {
+      rects += `<rect x="${x * s}" y="${y * s}" width="${s}" height="${s}"/>`;
+      if (!set.has(x + ',' + (y - 1))) d += `M${x * s} ${y * s}h${s}`;
+      if (!set.has(x + ',' + (y + 1))) d += `M${x * s} ${(y + 1) * s}h${s}`;
+      if (!set.has((x - 1) + ',' + y)) d += `M${x * s} ${y * s}v${s}`;
+      if (!set.has((x + 1) + ',' + y)) d += `M${(x + 1) * s} ${y * s}v${s}`;
+      top = Math.min(top, y); sumX += x; n++;
+    }
+    const g = document.createElementNS(SVGNS, 'g');
+    g.setAttribute('class', 'area');
+    g.dataset.key = key;
+    const label = area.label ? String(area.label).replace(/[&<>"']/g, '') : '';
+    const lx = (sumX / n + 0.5) * s, ly = Math.max(s * 0.8, top * s - s * 0.25);
+    g.innerHTML = rects + `<path d="${d}"/>`
+      + (label ? `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="${Math.max(14, Math.round(s * 0.55))}">${label}</text>` : '');
+    svg.appendChild(g);
   }
 
   // Fog (D9): dark where no PC can see, dim where one saw earlier, clear
@@ -464,7 +506,7 @@
 
   const api = {
     fit, tileKind, tokenView, hpState, initials, conditionIcon, STEPS,
-    drawTiles, drawFog, render, slide, tokenId, ensureBoard,
+    drawTiles, drawFog, drawArea, render, slide, tokenId, ensureBoard,
   };
   root.TV = root.TV || {};
   root.TV.board = Object.assign(root.TV.board || {}, api);

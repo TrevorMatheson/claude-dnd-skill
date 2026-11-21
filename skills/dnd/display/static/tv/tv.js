@@ -71,6 +71,13 @@
       panels.render(resolved, stats, wait);
     } catch (err) { console.error('tv: layout failed', err); }
   }
+  // Battle-map effects redraw the map as they play; a tab that comes back
+  // from the background jumps to the current state, no backlog (D17).
+  if (TV.map && TV.map.setOnChange) TV.map.setOnChange(() => redraw());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && TV.map && TV.map.flushAll) { TV.map.flushAll(); redraw(); }
+  });
+
   // Timed effects count down; refresh them while nothing else changes.
   setInterval(redraw, 30000);
   // The map's cell size follows its box; redraw it when the window changes.
@@ -79,6 +86,10 @@
 
   function onPayload(p) {
     if (!p || typeof p !== 'object') return;
+    // Rewind, clear or a (re)connect: the map shows now, nothing replays.
+    if ((p.rewind || p.clear || p.hello) && TV.map && TV.map.flushAll) {
+      try { TV.map.flushAll(); } catch (err) { console.error('tv: map flush failed', err); }
+    }
     feed.apply(p);
     devices.apply(p);
     let changed = false;
