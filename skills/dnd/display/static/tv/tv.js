@@ -88,7 +88,10 @@
     if (!p || typeof p !== 'object') return;
     // Rewind, clear or a (re)connect: the map shows now, nothing replays.
     if ((p.rewind || p.clear || p.hello) && TV.map && TV.map.flushAll) {
-      try { TV.map.flushAll(); } catch (err) { console.error('tv: map flush failed', err); }
+      try {
+        TV.map.flushAll();
+        if ((p.rewind || p.hello) && TV.map.resetSight) TV.map.resetSight();
+      } catch (err) { console.error('tv: map flush failed', err); }
     }
     feed.apply(p);
     devices.apply(p);

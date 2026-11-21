@@ -123,7 +123,10 @@
       if (!SP || !Array.isArray(list) || !list.length) return;
       const pos = {};
       for (const [n, t] of shown) pos[n] = [t.x, t.y];
-      const visible = opts.isVisible || ((n) => shown.has(nameKey(n)));
+      // Judged after this block's moves: a goblin that steps into view and
+      // shoots is seen shooting.
+      const toks = [...shown.values()];
+      const visible = opts.isVisible ? ((n) => opts.isVisible(n, toks)) : ((n) => shown.has(nameKey(n)));
       const items = SP.schedule(list, { pos, visible });
       for (const it of items) {
         if (it.snapped) continue;

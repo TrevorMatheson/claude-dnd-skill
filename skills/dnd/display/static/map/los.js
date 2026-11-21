@@ -114,14 +114,20 @@
       }
       // A wall, a doorway or the map's edge next to a visible open square
       // shows too, so a lit room shows all its walls, doors and corners.
+      // A doorway can hold a monster, so it shows only straight across from
+      // a visible square, never through a wall corner.
+      const add = [];
       for (let i = 0; i < W * H; i++) {
         if (vis[i] !== 1 || g.b[i]) continue;
         const qx = i % W, qy = (i - qx) / W;
         for (const [dx, dy] of NB8) {
           const nx = qx + dx, ny = qy + dy;
-          if (nx >= 0 && ny >= 0 && nx < W && ny < H && (g.b[ny * W + nx] || g.door[ny * W + nx])) vis[ny * W + nx] = 1;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const ni = ny * W + nx;
+          if (g.b[ni] || (g.door[ni] && (dx === 0 || dy === 0))) add.push(ni);
         }
       }
+      for (const ni of add) vis[ni] = 1;
       for (let i = 0; i < W * H; i++) if (vis[i] === 1) out.add((i % W) + ',' + ((i - (i % W)) / W));
     }
     memo.set(k, out);

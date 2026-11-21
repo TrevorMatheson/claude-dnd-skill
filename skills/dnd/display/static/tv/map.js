@@ -35,7 +35,8 @@
   // Per box: the layout it shows (a stable cells array, so line of sight is
   // memoised across payloads), the dim "seen earlier" squares, and how much
   // of fog.trail they already include.
-  const boxes = new WeakMap();
+  let boxes = new WeakMap();
+  let lastCells = null;
 
   // What the table may see of `m` with tokens at `tokens` (D9): the fog and
   // the tokens to draw. `seen` is rebuilt from fog.trail when a map loads
@@ -50,6 +51,7 @@
     let st = boxes.get(box);
     if (!st || st.ck !== ck) { st = { ck, cells: m.cells, seen: null, trailN: 0 }; boxes.set(box, st); }
     const mm = Object.assign({}, m, { cells: st.cells });
+    lastCells = st.cells;
     const trail = (m.fog && Array.isArray(m.fog.trail)) ? m.fog.trail : [];
     if (st.seen && absorbTrail && trail.length > st.trailN) {
       for (const p of trail.slice(st.trailN)) {
@@ -71,7 +73,7 @@
         onChange: () => { if (onChange) { try { onChange(); } catch (_) {} } },
         // An attack's unseen side doesn't play (fog, D9 + D15): what the
         // board drew last is what the table can see.
-        isVisible: (name) => !drawnNames || drawnNames.has(String(name)),
+        isVisible: (name, toks) => visibleAfter(name, toks),
       });
     }
     return fx;
@@ -84,8 +86,24 @@
   function blockArrived(seq, mapFx) { call('arrive', seq, mapFx); }
   function blockStarted(seq) { call('start', seq); }
   function blockSkipped(seq) { call('skip', seq); }
+  // Who the table can see with the tokens at `toks` (an attack planned
+  // after its block's moves). Falls back to what the board drew last.
+  let visCache = { toks: null, names: null };
+  function visibleAfter(name, toks) {
+    const L = los();
+    if (!L || !lastMap || !Array.isArray(toks)) return !drawnNames || drawnNames.has(String(name));
+    if (visCache.toks !== toks) {
+      const mm = Object.assign({}, lastMap, { cells: lastCells && lastCells.length === (lastMap.cells || []).length ? lastCells : lastMap.cells });
+      const f = L.fog(mm, toks, new Set());
+      visCache = { toks, names: new Set(toks.filter((t) => L.tokenShown(t, f)).map((t) => String(t.name))) };
+    }
+    return visCache.names.has(String(name));
+  }
+
   // A backgrounded tab returns, rewind, clear or a reconnect: jump to now.
   function flushAll() { call('flushAll'); }
+  // Rewind or a reconnect: the dim squares are rebuilt from fog.trail (D18).
+  function resetSight() { boxes = new WeakMap(); }
   function setOnChange(cb) { onChange = cb; }
 
   // Draw stats.map into `box`. Cheap to call again: tiles are redrawn only
@@ -140,7 +158,7 @@
     });
   }
 
-  const api = { canvasSize, alongPath, draw, sight, blockArrived, blockStarted, blockSkipped, flushAll, setOnChange };
+  const api = { canvasSize, alongPath, draw, sight, resetSight, blockArrived, blockStarted, blockSkipped, flushAll, setOnChange };
   root.TV = root.TV || {};
   root.TV.map = api;
   if (typeof module !== 'undefined') module.exports = api;

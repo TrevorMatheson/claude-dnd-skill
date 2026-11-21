@@ -302,6 +302,18 @@ def active_modifiers(campaign: str, entity_name: str, roll_type: str) -> list:
 _CAMPAIGN = None
 
 
+def _hidden_names() -> list:
+    """Names of the creatures hidden on the campaign's battle map."""
+    if not _CAMPAIGN:
+        return []
+    try:
+        with open(os.path.join(str(_find_campaign(_CAMPAIGN)), "battlemap.json"), encoding="utf-8") as f:
+            toks = json.load(f).get("tokens") or {}
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(n) for n, t in toks.items() if isinstance(t, dict) and t.get("hidden")]
+
+
 def _hidden_on_map(entity_name: str) -> bool:
     """True when the campaign's battle map has this creature hidden (battle
     map D10): nothing about it may reach a screen until it is revealed."""
@@ -333,7 +345,11 @@ def _push_conditions(entity_name: str, conditions: list[str]) -> None:
 
 
 def _send_announce(msg: str) -> None:
-    """Send a one-line announcement to the display companion."""
+    """Send a one-line announcement to the display companion (never one
+    about a creature hidden on the battle map: battle-map D10)."""
+    low = msg.lower()
+    if any(low.startswith(n.lower() + " ") for n in _hidden_names()):
+        return
     try:
         proc = subprocess.Popen(
             [sys.executable, SEND_PY, "--dice"],

@@ -676,11 +676,14 @@ def _apply_turn_effects(turn: dict, blocks: list) -> "tuple":
     if turn.get("moves"):
         if not per_block:
             per_block = [{}]
-        first = dict(per_block[0])
+        # A turn-level "moves" belongs to the first block that tells the
+        # story (an award block can't carry effects).
+        i0 = next((i for i, b in enumerate(blocks) if isinstance(b, dict) and not _is_award_block(b)), 0)
+        first = dict(per_block[i0])
         tm = turn["moves"] if isinstance(turn["moves"], list) else [turn["moves"]]
         bm_ = first.get("moves") or []
         first["moves"] = list(tm) + (list(bm_) if isinstance(bm_, list) else [bm_])
-        per_block[0] = first
+        per_block[i0] = first
     if not any(per_block):
         return None, [None] * len(blocks)
     _scripts = os.path.join(_DISPLAY_DIR, os.pardir, "scripts")
@@ -697,6 +700,10 @@ def _apply_turn_effects(turn: dict, blocks: list) -> "tuple":
     if not camp:
         raise ValueError("battle-map effects need a campaign: add \"campaign\" to the turn or load one first")
     cdir = find_campaign(camp)
+    # A fight with no battle map: attacks and spell areas only decorate the
+    # map, so they are dropped and the turn goes ahead; moves still need one.
+    if not bm.map_path(cdir).exists() and not any(fx.get("moves") for fx in per_block if fx):
+        return None, [None] * len(blocks)
     out = []
     where = "the map"
     try:
