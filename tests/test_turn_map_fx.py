@@ -535,3 +535,124 @@ class TestServerChunk(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── S12: attacks in the DM's instructions (AC17 groundwork, D15) ─────────────
+#
+# Extraction rule for the SKILL.md example (documented so a doc rewrite knows
+# what keeps the test green):
+#   1. Take the "## Battle map on the TV" section of skills/dnd/SKILL.md, up to
+#      the next "## " heading or "---" rule.
+#   2. Candidates, in document order: fenced ```json blocks, then (if none
+#      qualifies) inline `...` code spans.
+#   3. The example is the first candidate that mentions "attack" or "attacks"
+#      as a JSON key and parses as JSON. A bare fragment such as
+#      `"attack": {...}` is wrapped in {} before parsing.
+#   4. A parsed object with "blocks" is a whole turn; one with "text" is one
+#      block; anything else (just the attack keys) becomes the effects of a
+#      single narration block.
+# The example's token names must exist in the CELLAR fixture (Havoc, Anony,
+# Giant Rat, Giant Rat 2) and any "moves" in it must be legal on a fresh CELLAR.
+
+import pathlib  # noqa: E402
+import re  # noqa: E402
+
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+_SKILL = _ROOT / "skills" / "dnd" / "SKILL.md"
+_CHANGELOG = _ROOT / "CHANGELOG.md"
+_ATTACK_KEY = re.compile(r'"attacks?"\s*:')
+
+
+def _battle_map_section():
+    text = _SKILL.read_text(encoding="utf-8")
+    m = re.search(r"^## Battle map on the TV\s*$", text, re.M)
+    if not m:
+        return ""
+    rest = text[m.end():]
+    end = re.search(r"^(## |---\s*$)", rest, re.M)
+    return rest[:end.start()] if end else rest
+
+
+def _parse_candidate(src):
+    src = src.strip()
+    if src.startswith('"'):
+        src = "{" + src + "}"
+    try:
+        return json.loads(src)
+    except ValueError:
+        return None
+
+
+def _attack_example():
+    """(source text, turn dict) for the SKILL.md attack example, or (None, None)."""
+    sec = _battle_map_section()
+    fenced = re.findall(r"```json\s*\n(.*?)```", sec, re.S)
+    inline = re.findall(r"(?<!`)`([^`\n]+)`(?!`)", sec)
+    for src in fenced + inline:
+        if not _ATTACK_KEY.search(src):
+            continue
+        obj = _parse_candidate(src)
+        if not isinstance(obj, dict):
+            continue
+        if "blocks" in obj:
+            turn = obj
+        elif "text" in obj:
+            turn = {"blocks": [obj]}
+        else:
+            turn = {"blocks": [dict(obj, text="Example narration.")]}
+        return src, turn
+    return None, None
+
+
+def _example_attacks(turn):
+    out = []
+    for b in turn.get("blocks", []):
+        if isinstance(b, dict):
+            if isinstance(b.get("attack"), dict):
+                out.append(b["attack"])
+            out.extend(a for a in b.get("attacks", []) or [] if isinstance(a, dict))
+    return out
+
+
+class TestAttacksInSkillDoc(_Base):
+    """S12: SKILL.md tells the DM how attacks ride the turn call (D15, AC17)."""
+
+    def test_skill_attack_example_is_a_valid_turn(self):   # AC17 / D15
+        src, turn = _attack_example()
+        self.assertIsNotNone(
+            src, "no JSON attack example (a ```json block or inline `{...}` with an "
+                 "\"attack\"/\"attacks\" key) in SKILL.md's '## Battle map on the TV' section")
+        attacks = _example_attacks(turn)
+        self.assertTrue(attacks, f"example has no attack on a block: {src}")
+        for a in attacks:
+            self.assertEqual(set(a) & {"from", "to", "kind", "hit"}, {"from", "to", "kind", "hit"}, a)
+        rc, err = self.run_turn(turn)
+        self.assertEqual(rc, 0, f"send.py refused the SKILL.md example: {err}\n{src}")
+        sent = []
+        for c in self.chunks():
+            sent.extend(c.get("map_fx", {}).get("attacks") or [])
+        self.assertEqual([(a["from"], a["to"], a["kind"], a["hit"]) for a in sent],
+                         [(a["from"], a["to"], a["kind"], a["hit"]) for a in attacks],
+                         "the example's attacks did not all reach map_fx")
+
+    def test_skill_says_hit_comes_from_combat_attack_and_names_kinds(self):   # AC17 / D15
+        sec = _battle_map_section()
+        low = sec.lower()
+        # "hit" is taken from the `combat.py attack` result, in one sentence
+        sentences = re.split(r"(?<=[.!?])\s+", sec)
+        self.assertTrue(
+            any("hit" in s and re.search(r"(combat\.py\s+)?attack`?\s+result|result of `?(combat\.py )?attack", s)
+                for s in sentences),
+            "the section never says an attack's `hit` comes from the `combat.py attack` result")
+        # kind is one of melee / ranged / spell, named together
+        self.assertRegex(low, r"melee\s*[|/,]\s*ranged\s*[|/,]\s*(or\s+)?spell",
+                         "the section never says `kind` is melee|ranged|spell")
+        self.assertIn("kind", low)
+
+    def test_changelog_unreleased_mentions_attack_sprites(self):   # D15 milestone 2 line
+        text = _CHANGELOG.read_text(encoding="utf-8")
+        m = re.search(r"^## \[Unreleased\]\s*$(.*?)(?=^## \[)", text, re.M | re.S)
+        self.assertIsNotNone(m, "no [Unreleased] section in CHANGELOG.md")
+        unrel = m.group(1).lower()
+        self.assertTrue(re.search(r"attack[^\n]*(sprite|animation)|(sprite|animation)[^\n]*attack", unrel),
+                        "CHANGELOG [Unreleased] has no line about attack sprites (milestone 2)")

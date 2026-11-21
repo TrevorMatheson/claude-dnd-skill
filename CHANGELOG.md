@@ -24,6 +24,7 @@ From the first live table test (see `docs/ROADMAP.md`).
 - Tokens show an HP ring, initials or a portrait, and condition icons; PCs show exact HP, monsters only healthy / bloodied / near death (their numbers never reach a screen). The current turn has a halo.
 - Fog follows the PCs' line of sight: unseen squares are dark, squares seen earlier dim, and monsters appear only when a PC could see them. `combat.py hide/reveal` keeps a creature off every screen even in plain sight; `combat.py fog reveal|hide|auto` overrides fog by hand. Dim squares survive a reload.
 - In a `send.py --turn`, moves and spell areas (`"area": {"shape": "sphere", …}`) ride the narration block that describes them and play when it starts; the whole turn is rejected, with the reason, if any move goes through a wall or beyond speed. `combat.py move … --check` dry-runs a player's move and names the limit.
+- Attack sprites (milestone 2): an `attack` on a narration block plays a sword swing, an arrow or a magic bolt when the block starts; a hit flashes the target, a miss whiffs or glances off. Several attacks play back to back for at most 2 s, and a TV that falls behind skips them.
 
 **Table safety**
 - The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
