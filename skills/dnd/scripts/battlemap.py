@@ -471,6 +471,90 @@ def attack_range(m: dict, attacker: str, target: str, reach: int | None = None,
     return out
 
 
+# ── spell areas ──────────────────────────────────────────────────────────────
+
+AREA_SHAPES = ("sphere", "cylinder", "cube", "cone", "line")
+
+
+def _area_point(m: dict, v, what: str) -> tuple:
+    """A token name or an [x, y] square, as the square's centre."""
+    if isinstance(v, str):
+        _, t = token(m, v)
+        return t["x"] + 0.5, t["y"] + 0.5
+    if (isinstance(v, (list, tuple)) and len(v) == 2
+            and all(type(c) is int for c in v)):
+        return v[0] + 0.5, v[1] + 0.5
+    raise MapError(f"area {what} must be a token name or an [x, y] square, not {v!r}")
+
+
+def area_squares(m: dict, area: dict) -> list:
+    """The squares a spell area covers, as [[x, y], ...] (D14).
+
+    sphere / cylinder: centred on the centre of square `at`, radius `size` ft.
+    cube: top-left square `at`, side `size` ft.
+    cone: from `from` (token or square) toward `to`, length `size`, as wide as
+    it is long at its end (half-angle atan 1/2). line: from `from` toward
+    `to`, length `size`, `width` ft wide (default 5). A square is in when its
+    centre lies inside the shape; wall squares and squares off the map never
+    are. Raises MapError for a bad area or one with no square on the map."""
+    if not isinstance(area, dict):
+        raise MapError("area must be an object like {\"shape\": \"sphere\", \"size\": 20, \"at\": [x, y]}")
+    shape = area.get("shape")
+    if shape not in AREA_SHAPES:
+        raise MapError(f"area shape is one of {', '.join(AREA_SHAPES)}, not {shape!r}")
+    size = area.get("size")
+    if type(size) is not int or not (5 <= size <= 150):
+        raise MapError(f"area size is 5-150 ft, not {size!r}")
+    n = size / FT
+    g = m["grid"]
+    inside = []
+    if shape in ("sphere", "cylinder", "cube"):
+        if "at" not in area:
+            raise MapError(f"a {shape} needs \"at\": [x, y]")
+        cx, cy = _area_point(m, area["at"], "at")
+        if shape == "cube":
+            x0, y0 = cx - 0.5, cy - 0.5
+            test = lambda px, py: x0 <= px < x0 + n and y0 <= py < y0 + n
+        else:
+            test = lambda px, py: (px - cx) ** 2 + (py - cy) ** 2 <= n * n + 1e-9
+    else:
+        if "from" not in area or "to" not in area:
+            raise MapError(f"a {shape} needs \"from\" (a token or square) and \"to\" (a square or token)")
+        ox, oy = _area_point(m, area["from"], "from")
+        tx, ty = _area_point(m, area["to"], "to")
+        dx, dy = tx - ox, ty - oy
+        length = (dx * dx + dy * dy) ** 0.5
+        if length == 0:
+            raise MapError(f"a {shape}'s \"to\" must differ from its \"from\"")
+        ux, uy = dx / length, dy / length
+        if shape == "cone":
+            def test(px, py):
+                ax, ay = px - ox, py - oy
+                along = ax * ux + ay * uy
+                perp = abs(-ax * uy + ay * ux)
+                return 0 < along <= n + 1e-9 and perp <= along * 0.5 + 1e-9
+        else:
+            width = area.get("width", FT)
+            if type(width) is not int or not (5 <= width <= 30):
+                raise MapError(f"line width is 5-30 ft, not {width!r}")
+            half = width / FT / 2
+
+            def test(px, py):
+                ax, ay = px - ox, py - oy
+                along = ax * ux + ay * uy
+                perp = abs(-ax * uy + ay * ux)
+                return 0 < along <= n + 1e-9 and perp <= half + 1e-9
+    for y in range(g["h"]):
+        for x in range(g["w"]):
+            if cell(m, x, y) in ("#", " "):
+                continue
+            if test(x + 0.5, y + 0.5):
+                inside.append([x, y])
+    if not inside:
+        raise MapError("the area covers no square on the map")
+    return inside
+
+
 # ── display ──────────────────────────────────────────────────────────────────
 
 def display_payload(m: dict, hp: dict | None = None, conditions: dict | None = None) -> dict:

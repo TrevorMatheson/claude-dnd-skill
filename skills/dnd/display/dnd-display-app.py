@@ -1836,11 +1836,72 @@ def chunk():
         pass
 
     _log_append(log_entry, payload)
+    # Battle-map effects for this block (moves, a spell area, attacks) go to
+    # the screens live only: never into the log, so a replay or reconnect
+    # never plays them again (battle map D12, D17, AC11).
+    fx = _clean_map_fx(data.get("map_fx"))
+    if fx:
+        payload["map_fx"] = fx
 
     _persist_log()
     _persist_tail()
     _broadcast(payload)
     return "", 204
+
+
+def _fx_square(p, limit=200):
+    if (isinstance(p, (list, tuple)) and len(p) == 2
+            and all(type(c) is int and -1 < c < limit for c in p)):
+        return [p[0], p[1]]
+    return None
+
+
+def _clean_map_fx(fx):
+    """Whitelist a block's battle-map effects: {"moves": [{"name","x","y",
+    "path"?,"hp_state"?}], "area": {"squares","shape","label"?}, "attacks":
+    [{"from"?,"to","kind","hit"}]}, ints only, sizes capped. None if empty."""
+    if not isinstance(fx, dict):
+        return None
+    out = {}
+    moves = []
+    for mv in fx.get("moves")[:20] if isinstance(fx.get("moves"), list) else []:
+        if not isinstance(mv, dict) or not isinstance(mv.get("name"), str) or not mv["name"]:
+            continue
+        sq = _fx_square([mv.get("x"), mv.get("y")])
+        if sq is None:
+            continue
+        d = {"name": mv["name"][:40], "x": sq[0], "y": sq[1]}
+        if isinstance(mv.get("path"), list):
+            path = [q for q in (_fx_square(p) for p in mv["path"][:60]) if q]
+            if path:
+                d["path"] = path
+        if mv.get("hp_state") in _HP_STATES:
+            d["hp_state"] = mv["hp_state"]
+        moves.append(d)
+    if moves:
+        out["moves"] = moves
+    a = fx.get("area")
+    if isinstance(a, dict) and isinstance(a.get("squares"), list):
+        squares = [q for q in (_fx_square(p) for p in a["squares"][:600]) if q]
+        if squares:
+            area = {"squares": squares}
+            if a.get("shape") in ("sphere", "cylinder", "cube", "cone", "line"):
+                area["shape"] = a["shape"]
+            if isinstance(a.get("label"), str) and a["label"].strip():
+                area["label"] = a["label"].strip()[:40]
+            out["area"] = area
+    attacks = []
+    for at in fx.get("attacks")[:8] if isinstance(fx.get("attacks"), list) else []:
+        if (not isinstance(at, dict) or not isinstance(at.get("to"), str) or not at["to"]
+                or at.get("kind") not in ("melee", "ranged", "spell") or not isinstance(at.get("hit"), bool)):
+            continue
+        e = {"to": at["to"][:40], "kind": at["kind"], "hit": at["hit"]}
+        if isinstance(at.get("from"), str) and at["from"]:
+            e["from"] = at["from"][:40]
+        attacks.append(e)
+    if attacks:
+        out["attacks"] = attacks
+    return out or None
 
 
 @app.route("/stats", methods=["POST"])

@@ -533,6 +533,10 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #      {"action": "Havoc", "text": "Havoc swings at the rat."},
 #      {"dice": true, "text": "Havoc: 2d20 adv [7, 16] +5 = 21 vs AC 12 — HIT"},
 #      {"text": "The blade bites ..."},                        # narration
+#      {"text": "The rat scurries behind the crates.",        # battle map effects ride
+#       "moves": [{"name": "Giant Rat", "x": 8, "y": 1, "hp": "3/7"}],   # the block that
+#       "area": {"shape": "sphere", "size": 20, "at": [8, 3], "label": "Fireball"},
+#       "attack": {"from": "Havoc", "to": "Giant Rat", "kind": "melee", "hit": true}},
 #      {"npc": "Mira", "text": "Behind you!"},   # read in Mira's own voice (npcs.md)
 #      {"tutor": true, "text": "Advantage: roll two d20s, keep the higher."},
 #      {"xp_award": {"names": ["Havoc"], "xp": 25, "reason": "rat"}},
@@ -540,15 +544,24 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #    "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
 #    "turn": "Anony", "round": 2,          # turn pointer (turn_order.current)
 #    "awaiting": ["Anony"],                # whose Send completes the turn ("party" = all)
-#    "moves": [{"name": "Giant Rat", "x": 4, "y": 6, "hp": "3/7"}],  # battle map (combat.py map):
-#                                          # checked against walls and speed before anything is sent
+#    "moves": [...],                       # turn-level moves: treated as the first block's
 #    "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3,
 #                     "label": "Dex save", "dc": 13, "wait": true}}
 #
 # A block may also be written {"type": "npc", "name": "Mira", "text": "..."}.
-# Block order is display order. Stats, turn pointer, awaiting and moves go in
-# one /stats post after the blocks, so the sidebar changes as the narration
-# lands; the dice request (if any) is last.
+# Block order is display order. Stats, turn pointer, awaiting and the final
+# battle map go in one /stats post after the blocks, so the sidebar changes as
+# the narration lands; the dice request (if any) is last.
+#
+# Battle map effects (any text block; spec D12-D15): "moves" (each
+# {"name","x","y","dash"?,"force"?,"turn"?,"hp"?}), "area" ({"shape":
+# sphere|cylinder|cube|cone|line, "size": 5-150 ft, "at": [x,y] or "from":
+# token|[x,y] with "to", "width"?, "label"?}) and "attack"/"attacks" ({"from",
+# "to", "kind": melee|ranged|spell, "hit": true|false}). Every move is checked
+# in block order (walls, speed, occupied squares) and every area and attack is
+# validated before anything is sent: one bad effect rejects the whole turn.
+# The TV plays each block's effects when that block starts (its first chunk
+# carries them as "map_fx"); hidden tokens never appear in them.
 
 _BLOCK_TYPES = ("narration", "action", "player", "npc", "dice", "tutor")
 
@@ -572,11 +585,16 @@ def _load_turn(src: str) -> dict:
     return turn
 
 
+_EFFECT_KEYS = ("moves", "area", "attack", "attacks")
+_ATTACK_KINDS = ("melee", "ranged", "spell")
+
+
 def _turn_block_payloads(block: dict) -> list:
-    """Chunk payloads for one turn block, in order. Raises ValueError."""
+    """Chunk payloads for one turn block, in order. Raises ValueError.
+    Battle-map effect keys are left out here (_apply_turn_effects)."""
     if not isinstance(block, dict):
         raise ValueError(f"block is not an object: {block!r}")
-    b = dict(block)
+    b = {k: v for k, v in block.items() if k not in _EFFECT_KEYS}
     kind = b.pop("type", None)
     if kind is not None:
         if kind not in _BLOCK_TYPES + ("xp_award", "inspiration_award", "milestone_award"):
@@ -629,14 +647,42 @@ def _turn_stats(turn: dict) -> "dict | None":
     return stats or None
 
 
-def _apply_turn_moves(turn: dict) -> "dict | None":
-    """Apply a turn's token moves to the campaign's battle map (validated by
-    battlemap.py: walls, speed, occupied squares) and return the display map
-    payload. Raises ValueError naming the move that failed; nothing is saved
-    then. Each move: {"name", "x", "y", "dash"?, "force"?, "turn"?: true}."""
-    moves = turn.get("moves")
-    if not moves:
-        return None
+def _block_effects(block) -> dict:
+    """The battle-map effect keys of one block (empty when none)."""
+    if not isinstance(block, dict):
+        return {}
+    return {k: block[k] for k in _EFFECT_KEYS if k in block}
+
+
+def _is_award_block(block: dict) -> bool:
+    return bool(block.get("xp_award") or block.get("inspiration_award") or block.get("milestone_award")
+                or block.get("type") in ("xp_award", "inspiration_award", "milestone_award"))
+
+
+def _apply_turn_effects(turn: dict, blocks: list) -> "tuple":
+    """Apply a turn's battle-map effects block by block and return
+    (map payload | None, [map_fx | None per block]).
+
+    Moves are checked in block order by battlemap.py (walls, speed, occupied
+    squares), areas and attacks are validated; any failure raises ValueError
+    naming it, and nothing is saved then. A turn-level "moves" belongs to the
+    first block. Hidden tokens are left out of map_fx: their moves are not
+    shown, an attack from one loses its "from", an attack on one is dropped."""
+    per_block = [_block_effects(b) for b in blocks]
+    for i, (b, fx) in enumerate(zip(blocks, per_block)):
+        if fx and _is_award_block(b):
+            raise ValueError(f"block {i + 1}: battle-map effects ({', '.join(fx)}) go on a text block, "
+                             f"not an award")
+    if turn.get("moves"):
+        if not per_block:
+            per_block = [{}]
+        first = dict(per_block[0])
+        tm = turn["moves"] if isinstance(turn["moves"], list) else [turn["moves"]]
+        bm_ = first.get("moves") or []
+        first["moves"] = list(tm) + (list(bm_) if isinstance(bm_, list) else [bm_])
+        per_block[0] = first
+    if not any(per_block):
+        return None, [None] * len(blocks)
     _scripts = os.path.join(_DISPLAY_DIR, os.pardir, "scripts")
     if _scripts not in sys.path:
         sys.path.insert(0, _scripts)
@@ -649,23 +695,92 @@ def _apply_turn_moves(turn: dict) -> "dict | None":
         except OSError:
             camp = ""
     if not camp:
-        raise ValueError("moves need a campaign: add \"campaign\" to the turn or load one first")
+        raise ValueError("battle-map effects need a campaign: add \"campaign\" to the turn or load one first")
     cdir = find_campaign(camp)
+    out = []
     try:
         m = bm.load(cdir)
-        for mv in moves:
-            if mv.get("turn"):
-                bm.start_turn(m, mv["name"])
-            if "x" in mv and "y" in mv:
-                bm.move(m, mv["name"], int(mv["x"]), int(mv["y"]),
-                        dash=bool(mv.get("dash")), force=bool(mv.get("force")))
-            if "hp" in mv:
-                hp = [int(v) for v in str(mv["hp"]).split("/")]
-                bm.set_hp(m, mv["name"], hp[0], hp[1] if len(hp) > 1 else None)
-    except (bm.MapError, KeyError, TypeError) as exc:
-        raise ValueError(f"move refused: {exc}")
+        for i, fx in enumerate(per_block):
+            where = f"block {i + 1}"
+            if not fx:
+                out.append(None)
+                continue
+            shown = {}
+            moves = fx.get("moves") or []
+            if not isinstance(moves, list):
+                moves = [moves]
+            fx_moves = []
+            for mv in moves:
+                if not isinstance(mv, dict) or not mv.get("name"):
+                    raise ValueError(f"{where}: a move needs a name: {mv!r}")
+                n, t = bm.token(m, str(mv["name"]))
+                if mv.get("turn"):
+                    bm.start_turn(m, n)
+                entry = {"name": n}
+                if "x" in mv or "y" in mv:
+                    r = bm.move(m, n, int(mv["x"]), int(mv["y"]),
+                                dash=bool(mv.get("dash")), force=bool(mv.get("force")))
+                    entry["path"] = [list(p) for p in r["path"]][:60]
+                if "hp" in mv:
+                    hp = [int(v) for v in str(mv["hp"]).split("/")]
+                    bm.set_hp(m, n, hp[0], hp[1] if len(hp) > 1 else None)
+                    if t.get("kind") != "pc":
+                        st = bm.hp_state(*t["hp"])
+                        if st:
+                            entry["hp_state"] = st
+                entry["x"], entry["y"] = t["x"], t["y"]
+                if not t.get("hidden"):
+                    fx_moves.append(entry)
+            if fx_moves:
+                shown["moves"] = fx_moves
+            if "area" in fx:
+                area = fx["area"]
+                squares = bm.area_squares(m, area)
+                a = {"shape": area["shape"], "squares": squares}
+                if area.get("label"):
+                    a["label"] = str(area["label"])[:40]
+                shown["area"] = a
+            attacks = []
+            if "attack" in fx:
+                attacks.append(fx["attack"])
+            if "attacks" in fx:
+                if not isinstance(fx["attacks"], list):
+                    raise ValueError(f"{where}: \"attacks\" is a list of attacks")
+                attacks.extend(fx["attacks"])
+            fx_attacks = []
+            for at in attacks:
+                if not isinstance(at, dict):
+                    raise ValueError(f"{where}: an attack is an object, not {at!r}")
+                if at.get("kind") not in _ATTACK_KINDS:
+                    raise ValueError(f"{where}: attack kind is one of {', '.join(_ATTACK_KINDS)}, "
+                                     f"not {at.get('kind')!r}")
+                if not isinstance(at.get("hit"), bool):
+                    raise ValueError(f"{where}: attack \"hit\" must be true or false, not {at.get('hit')!r}")
+                if not at.get("from") or not at.get("to"):
+                    raise ValueError(f"{where}: an attack needs \"from\" and \"to\" token names")
+                an, a_t = bm.token(m, str(at["from"]))
+                tn, t_t = bm.token(m, str(at["to"]))
+                if t_t.get("hidden"):
+                    continue
+                e = {"to": tn, "kind": at["kind"], "hit": at["hit"]}
+                if not a_t.get("hidden"):
+                    e = {"from": an, **e}
+                fx_attacks.append(e)
+            if fx_attacks:
+                shown["attacks"] = fx_attacks
+            out.append(shown or None)
+    except (bm.MapError, KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, bm.MapError) and str(exc).startswith("block "):
+            raise
+        raise ValueError(f"battle-map effect refused: {exc}")
     bm.save(cdir, m)
-    return bm.display_payload(m)
+    try:
+        import combat
+        conds = combat.tracker_conditions(cdir)
+    except Exception:
+        conds = None
+    out += [None] * (len(blocks) - len(out))
+    return bm.display_payload(m, conditions=conds), out[:len(blocks)] if blocks else out
 
 
 def send_turn(turn: dict, as_json: bool = False) -> int:
@@ -675,21 +790,28 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
     if unknown:
         print(f"send.py: --turn has unknown keys: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2
+    blocks = turn.get("blocks") or []
     try:
-        payloads = [p for blk in (turn.get("blocks") or []) for p in _turn_block_payloads(blk)]
+        per_block = [_turn_block_payloads(blk) for blk in blocks]
     except ValueError as exc:
         print(f"send.py: --turn: {exc}", file=sys.stderr)
         return 2
+    payloads = [p for ps in per_block for p in ps]
     for p in payloads:
         issues = _validate_payload(p, "chunk")
         if issues:
             print(f"send.py: --turn block invalid: {'; '.join(issues)}", file=sys.stderr)
             return 2
     try:
-        map_payload = _apply_turn_moves(turn)
+        map_payload, fx = _apply_turn_effects(turn, blocks)
     except ValueError as exc:
         print(f"send.py: --turn: {exc} — nothing was sent", file=sys.stderr)
         return 2
+    # Each block's effects ride its first chunk, so the TV plays them when
+    # that block starts (D12).
+    for ps, f in zip(per_block, fx):
+        if f and ps:
+            ps[0]["map_fx"] = f
 
     token = _read_token()
     for p in payloads:
