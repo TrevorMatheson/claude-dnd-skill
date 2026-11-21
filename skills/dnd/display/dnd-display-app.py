@@ -51,6 +51,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from runtime_paths import rt          # resolves <data-root>/.runtime
 import display_config                 # per-campaign display.json (layout, voice)
+import scene_images                   # place pictures in <campaign>/scenes/ (scene backgrounds)
 LOG_FILE      = rt("text_log.json")
 
 # SRD lookup module — degrades silently if dataset not built
@@ -1572,6 +1573,45 @@ def display_mode_post():
     return jsonify(mode_override=_mode_override)
 
 
+@app.route("/scene-image/<path:name>", merge_slashes=False)
+def scene_image(name):
+    """A place's picture from the active campaign's scenes/ folder (scene
+    backgrounds spec D5). Plain file names only; the type comes from the
+    file's bytes, since a generated .png may hold JPEG data."""
+    camp = _active_campaign_name()
+    if not camp:
+        return "Not found", 404
+    try:
+        path = scene_images.resolve_file(_find_campaign(camp), name)
+    except Exception:
+        path = None
+    mimetype = scene_images.sniff_mimetype(path) if path else None
+    if not mimetype:
+        return "Not found", 404
+    return send_from_directory(str(path.parent), path.name, mimetype=mimetype)
+
+
+def _resolve_place(raw, campaign: Optional[str]):
+    """(ok, place) for a /stats "place": ok is False for a shape we ignore;
+    place is None for null, else {name, slug, image, pending}. The look is
+    never kept: stats reach the phones."""
+    if raw is None:
+        return True, None
+    clean = scene_images.clean_place(raw)
+    if clean is None:
+        return False, None
+    s = scene_images.slug(clean["name"])
+    image = None
+    if campaign:
+        try:
+            found = scene_images.find_image(_find_campaign(campaign), s)
+        except Exception:
+            found = None
+        if found:
+            image = scene_images.image_url(found[0])
+    return True, {"name": clean["name"], "slug": s, "image": image, "pending": False}
+
+
 @app.route("/icons/<path:filename>")
 def serve_icon(filename):
     """Serve icons, favicon, and brand assets from display/icons/."""
@@ -1864,8 +1904,20 @@ def stats():
             _check_auto_trigger()
             return "", 204
 
+    # The place's picture is looked up before taking the stats lock (it reads
+    # the campaign's scenes/ folder).
+    _place_ok, _place = False, None
+    if "place" in data:
+        _place_campaign = (str(data["campaign"]).strip() if data.get("campaign")
+                           else _active_campaign_name())
+        _place_ok, _place = _resolve_place(data["place"], _place_campaign)
+    _old_campaign = _active_campaign_name() if "campaign" in data else None
+
     _effect_expire_events: list[dict] = []
     with _stats_lock:
+        if _place_ok:
+            _current_stats["place"] = _place
+
         if "players" in data:
             # replace_players=true wipes the list first — used on campaign load
             if data.get("replace_players"):
@@ -2083,7 +2135,8 @@ def stats():
                 _autorun_cycle = None
         _broadcast({"autorun_waiting": bool(data["autorun_waiting"])})
         if not any(k in data for k in ("players", "turn_order", "world_time", "factions",
-                                        "quests", "replace_players", "sheet", "autorun_cycle")):
+                                        "quests", "replace_players", "sheet", "autorun_cycle",
+                                        "place")):
             return "", 204
 
     if "autorun_cycle" in data:
@@ -2091,7 +2144,7 @@ def stats():
             _autorun_cycle = data["autorun_cycle"]
         _broadcast({"autorun_cycle": data["autorun_cycle"]})
         if not any(k in data for k in ("players", "turn_order", "world_time", "factions",
-                                        "replace_players", "sheet", "autorun_threshold")):
+                                        "replace_players", "sheet", "autorun_threshold", "place")):
             return "", 204
 
     if "autorun_threshold" in data:
@@ -2100,7 +2153,7 @@ def stats():
         _autorun_threshold = int(val) if val is not None else None
         _broadcast({"autorun_threshold": _autorun_threshold})
         if not any(k in data for k in ("players", "turn_order", "world_time", "factions",
-                                        "replace_players", "sheet")):
+                                        "replace_players", "sheet", "place")):
             return "", 204
 
     # Write active campaign name so dm_help.py always reads the current campaign.
@@ -2113,6 +2166,11 @@ def stats():
             _load_tail()
         except Exception:
             pass
+        # A new campaign starts with no place on screen (scene backgrounds).
+        if "place" not in data and _old_campaign != (str(data["campaign"]).strip() or None):
+            with _stats_lock:
+                _current_stats.pop("place", None)
+                current = dict(_current_stats)
         # Open screens switch to the new campaign's layout and voice settings
         # (the cache reloads because the active campaign name changed).
         try:
@@ -2358,7 +2416,8 @@ def map_image(name):
 
 def _active_campaign_name() -> Optional[str]:
     try:
-        return open(CAMP_FILE, encoding="utf-8").read().strip() or None
+        with open(CAMP_FILE, encoding="utf-8") as f:
+            return f.read().strip() or None
     except OSError:
         return None
 
