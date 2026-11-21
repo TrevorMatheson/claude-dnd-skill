@@ -107,6 +107,31 @@ python $DISPLAY/cast.py set -c <campaign> --npc "Name" bf_emma
 python $DISPLAY/cast.py set -c <campaign> --pc  "Name" am_liam
 ```
 
+## The battle map on `/tv`
+
+In a fight with a map, `/tv` shows it in the combat column (or a Tactical
+side panel). Claude keeps positions in `<campaign>/battlemap.json` through
+`combat.py map/place/move/hide/reveal/fog`; the TV draws:
+
+- **Tiles from the text layout** (`#` wall, `.` floor, `~` rough ground,
+  `T` obstacle, `D` door) — stone floor, walls, plank doors, crates — or
+  translucent over an image from the campaign's `maps/` folder. The whole
+  map always fits its area (at most 30×20 squares, never panned or zoomed).
+- **Tokens** with an HP ring, initials or a portrait (`place … --portrait
+  maps/tokens/x.png`), condition icons and the current turn's halo. PCs show
+  exact HP; monsters only healthy, bloodied or near death.
+- **Fog from the PCs' line of sight**: dark where no PC can see, dim where
+  one saw earlier, clear where one sees now. A monster appears only once a
+  PC could see it; a hidden token (`hide`) is never sent to any screen.
+  Claude can `fog reveal|hide|auto` a rectangle by hand.
+- **Moves and spell areas timed to the story**: in a `send.py --turn`, a
+  block's `moves` slide when that block starts playing, and its `area`
+  outlines the squares for 3 s. A reloaded or backgrounded TV jumps to the
+  current state and replays nothing.
+
+The shared map code lives in `static/map/` (`board.js`, `los.js`, `fx.js`,
+`map.css`), so the phone's Map tab can reuse it later.
+
 ## How it works
 
 | Component | Role |

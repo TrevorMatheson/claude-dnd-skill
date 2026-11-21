@@ -164,6 +164,12 @@ and is read aloud in full, with characters in distinct voices.
 
 ## Phase 3 — the map follows the action
 
+**Status (2026-11-20):** built as the battle map spec
+(`docs/specs/2026-11-17-battle-map.md`) on `claude/battle-map-bd6cc1`: items
+1–3 are done on `/tv` (positions, the map panel with fog and moves timed to
+narration, text layouts and `maps/` images). Item 4 is dropped: the spec
+stops work on D&D Beyond Maps (D3), and the DM no longer offers it.
+
 D&D Beyond Maps has no API, so everything goes through the browser. That works
 for setting a scene (slowly) but can't keep up with turns. **Recommendation:
 put the live battle map in our own TV display, and treat D&D Beyond Maps as an
@@ -262,7 +268,9 @@ old page; S17 (switching `/`) waits on one real game night on `/tv`. The other f
 
 1. **Map** — `docs/specs/2026-11-17-battle-map.md` (approved): our own map,
    fog from line of sight, moves timed to narration; attack sprites as
-   milestone 2. Needs the foundation's `/tv`.
+   milestone 2. Needs the foundation's `/tv`. Built on
+   `claude/battle-map-bd6cc1` (2026-11-20); the table checks (AC14, AC17)
+   wait on a game night.
 2. **Phone sheet** — `docs/specs/2026-11-18-phone-sheet.md` (approved):
    `/phone`, automatic resource tracking, tap-to-roll; the Map tab waits for
    Map milestone 1.

@@ -19,6 +19,12 @@ From the first live table test (see `docs/ROADMAP.md`).
 - Player characters have voices; with "Read player actions aloud" on, typed actions are read in the character's voice before the DM answers (Talk isn't read back).
 - Rolling initiative starts combat mode and `combat.py end` finishes it.
 
+**Battle map (on `/tv`)**
+- Our own battle map replaces the D&D Beyond Maps offer (the `maps` skill stays in the repo, unchanged): the text layout is drawn as themed tiles (stone floor, walls, doors, rough ground, obstacles), optionally over a `maps/` image, and always fits its area. New maps are capped at 30×20.
+- Tokens show an HP ring, initials or a portrait, and condition icons; PCs show exact HP, monsters only healthy / bloodied / near death (their numbers never reach a screen). The current turn has a halo.
+- Fog follows the PCs' line of sight: unseen squares are dark, squares seen earlier dim, and monsters appear only when a PC could see them. `combat.py hide/reveal` keeps a creature off every screen even in plain sight; `combat.py fog reveal|hide|auto` overrides fog by hand. Dim squares survive a reload.
+- In a `send.py --turn`, moves and spell areas (`"area": {"shape": "sphere", …}`) ride the narration block that describes them and play when it starts; the whole turn is rejected, with the reason, if any move goes through a wall or beyond speed. `combat.py move … --check` dry-runs a player's move and names the limit.
+
 **Table safety**
 - The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
 - plugin.json / marketplace.json / SKILL.md versions match VERSION again (they said 2.4.0), with a test.
