@@ -1,0 +1,88 @@
+/* The player page (phone sheet spec D1–D4). Theme from static/tv/tokens.css.
+   body[data-layout="phone"]: one pane at a time with a tab bar at the bottom.
+   body[data-layout="desktop"]: Play and Sheet side by side, Map below in combat. */
+
+:root {
+  --bg: #14100d;
+  --bg-raise: #1d1713;
+  --line: rgba(241, 235, 225, .14);
+  --tap: 44px;
+  --ui: var(--f-body);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-text-size-adjust: 100%;
+  min-height: 100vh;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+.muted { color: var(--ink-dim); font-style: italic; }
+
+/* ── Frame ─────────────────────────────────────────────────────────────── */
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+.top {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 5; background: var(--bg);
+}
+.me { font-family: var(--f-display); font-size: 1.25rem; font-weight: 600; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn { color: var(--accent); font-size: .85rem; font-style: italic; }
+.switch {
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 12px; font-size: .8rem; color: var(--ink-dim); min-height: 32px;
+}
+
+.panes { flex: 1; }
+.pane { padding: 16px; }
+
+/* ── Phone layout: tabs ────────────────────────────────────────────────── */
+body[data-layout="phone"] .panes { padding-bottom: calc(var(--tap) + 24px + env(safe-area-inset-bottom)); }
+body[data-layout="phone"] .pane { display: none; }
+body[data-layout="phone"][data-tab="play"] #pane-play,
+body[data-layout="phone"][data-tab="sheet"] #pane-sheet,
+body[data-layout="phone"][data-tab="map"] #pane-map { display: block; }
+
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; background: var(--bg); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1; min-height: calc(var(--tap) + 8px); background: none; border: 0;
+  font-family: var(--f-label); font-style: var(--label-style); font-size: 1.05rem;
+  color: var(--ink-dim); border-top: 2px solid transparent;
+}
+.tab.on { color: var(--ink); border-top-color: var(--accent); }
+body[data-layout="desktop"] .tabbar { display: none; }
+
+/* ── Desktop layout: side by side ──────────────────────────────────────── */
+body[data-layout="desktop"] .panes {
+  display: grid; grid-template-columns: minmax(320px, 2fr) minmax(360px, 3fr);
+  grid-template-areas: "play sheet" "map map";
+  gap: 0; max-width: 1400px; width: 100%; margin: 0 auto; align-items: start;
+}
+body[data-layout="desktop"] #pane-play { grid-area: play; border-right: 1px solid var(--line);
+  position: sticky; top: 57px; max-height: calc(100vh - 57px); overflow-y: auto; }
+body[data-layout="desktop"] #pane-sheet { grid-area: sheet; }
+body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid var(--line); }
+
+/* ── Picker ────────────────────────────────────────────────────────────── */
+.picker { padding: 24px 16px; max-width: 480px; margin: 0 auto; }
+.picker h1 { font-family: var(--f-display); font-weight: 600; font-size: 1.6rem; margin: 0 0 16px; }
+.picker-list { display: flex; flex-direction: column; gap: 10px; }
+.picker-opt {
+  min-height: var(--tap); text-align: left; padding: 10px 16px;
+  background: var(--bg-raise); border: 1px solid var(--line); font-size: 1.1rem;
+}
+
+/* ── Not sent list (D14) ───────────────────────────────────────────────── */
+.unsent { padding: 8px 16px; border-bottom: 1px solid var(--line); background: rgba(224, 106, 85, .08); }

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="dnd-token" content="{{ lan_token }}">
+<meta name="narrator-voice" content="{{ narrator_voice }}">
+<meta name="voice-on" content="{{ '1' if voice_on else '0' }}">
+<meta name="map-check" content="{{ '1' if map_check else '0' }}">
+<meta name="map-board" content="{{ '1' if map_board else '0' }}">
+<meta name="theme-color" content="#14100d">
+<title>DnD — Player</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/app_icon_32.png">
+<link rel="apple-touch-icon" href="/icons/app_icon_180.png">
+<link rel="stylesheet" href="/static/tv/tokens.css">
+<link rel="stylesheet" href="/static/phone/phone.css">
+</head>
+<body data-layout="phone" data-tab="play">
+<div id="phone-app" class="app">
+  <header class="top">
+    <span id="me-name" class="me">—</span>
+    <span id="conn" class="conn" hidden role="status">Reconnecting…</span>
+    <button id="layout-switch" class="switch" type="button">Desktop version</button>
+  </header>
+
+  <!-- Shown when the page is opened with no ?char= (D1: same binding as the old page). -->
+  <section id="char-picker" class="picker" hidden aria-label="Choose your character">
+    <h1>Who are you playing?</h1>
+    <div id="picker-list" class="picker-list"><p class="muted">Loading party…</p></div>
+  </section>
+
+  <div id="unsent" class="unsent" hidden aria-live="polite"></div>
+
+  <main id="panes" class="panes">
+    <section id="pane-play" class="pane" data-pane="play" aria-label="Play">
+      <div id="wait-banner" class="wait" hidden></div>
+      <div id="roll-card" class="roll-card" hidden></div>
+      <div id="play-body" class="play-body"></div>
+      <!-- The Talk button lives here and only here (D15). Pass the mic replaces
+           static/phone/talk.js and this slot. -->
+      <div id="talk-slot" class="talk-slot"></div>
+    </section>
+    <section id="pane-sheet" class="pane" data-pane="sheet" aria-label="Character sheet">
+      <div id="sheet-body" class="sheet-body"><p class="muted">Loading sheet…</p></div>
+    </section>
+    <section id="pane-map" class="pane" data-pane="map" aria-label="Battle map" hidden>
+      <div id="map-body" class="map-body"></div>
+    </section>
+  </main>
+
+  <nav id="tabbar" class="tabbar" aria-label="Sections">
+    <button type="button" class="tab" data-tab="play">Play</button>
+    <button type="button" class="tab" data-tab="sheet">Sheet</button>
+    <button type="button" class="tab" data-tab="map" hidden>Map</button>
+  </nav>
+</div>
+<script src="/static/tv/stream.js"></script>
+<script src="/static/tv/panels.js"></script>
+<script src="/static/phone/layout.js"></script>
+<script src="/static/phone/phone.js"></script>
+</body>
+</html>

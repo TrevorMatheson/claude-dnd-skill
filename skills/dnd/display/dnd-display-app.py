@@ -1409,7 +1409,20 @@ def _page_vars() -> dict:
         voice_on=_voice_payload()["on"],
         voice_reason=_voice_payload()["reason"],
         voice_local=bool(_tts is not None and getattr(_tts, "kokoro_installed", lambda: False)()),
+        # The phone's Map tab (milestone 2) shows only when the battle map's
+        # dry run and board are both on this install.
+        map_check=_map_check_available(),
+        map_board=os.path.isfile(os.path.join(_HERE, "static", "map", "board.js")),
     )
+
+
+def _map_check_available() -> bool:
+    """True when the battle map's check_move dry run exists (map milestone 1)."""
+    try:
+        import map_moves
+        return bool(map_moves.available())
+    except Exception:
+        return False
 
 
 @app.route("/")
@@ -1422,6 +1435,13 @@ def tv():
     """The new TV page (display foundation spec). Runs beside the old page
     at / until a real game night has been played on it."""
     return render_template("tv.html", **_page_vars())
+
+
+@app.route("/phone")
+def phone():
+    """The new player page (phone sheet spec D1): Play, Sheet and, in combat,
+    Map. Runs beside the old page at / until a game night has been played on it."""
+    return render_template("phone.html", **_page_vars())
 
 
 @app.route("/layout")
