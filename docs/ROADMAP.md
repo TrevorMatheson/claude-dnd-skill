@@ -269,5 +269,6 @@ old page; S17 (switching `/`) waits on one real game night on `/tv`. The other f
 3. **Pass the mic** — `docs/specs/2026-11-18-pass-the-mic.md` (approved):
    hold-to-talk on `/phone`, auto-send with undo, queue, typing always there.
 4. **Scene backgrounds** — `docs/specs/2026-11-18-scene-backgrounds.md`
-   (approved): mood layers plus a picture of the place; starts with a Gemini
-   image trial.
+   (built on `claude/scene-backgrounds-00cc33`): mood layers plus a picture
+   of the place. The Gemini image trial passed (D17), so pictures are made
+   in the background; the table check (AC11) waits for a game night.

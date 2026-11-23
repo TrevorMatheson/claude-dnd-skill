@@ -107,6 +107,41 @@ python $DISPLAY/cast.py set -c <campaign> --npc "Name" bf_emma
 python $DISPLAY/cast.py set -c <campaign> --pc  "Name" am_liam
 ```
 
+### Scene backgrounds on `/tv`
+
+The TV background has two layers. The **mood layer** is always there: each
+scene type (inn, crypt, forest, town, …) has its own animated mix of fog,
+embers, rain, light shafts and so on, and it crossfades when the scene
+changes. Under it sits a **picture of the place** the party is in, darkened
+and softened behind the narration so the text stays readable (the page
+measures it and dims more if needed). In combat the map's area stays plain
+and the picture shows only behind the narration column.
+
+- **Where pictures come from.** When a turn names a place (`"location"` in
+  `send.py --turn`, see SKILL.md), the display looks in
+  `<campaign>/scenes/` for a picture named after it: `The Flooded Crypt.jpg`,
+  `the-flooded-crypt.png` and so on (png, jpg, jpeg or webp). A picture you
+  drop there always wins. If there is none, Gemini makes one in the
+  background on the voice's key (one image request per new place, made once
+  and kept as `scenes/<place>.png`), and it fades in when ready; the
+  narration never waits. `"renew": true` in the location remakes a picture
+  the display made (never yours).
+- **Settings.** `/layout` → *Scene pictures*: turn picture-making on or off
+  for the campaign (on by default when a key exists) and the art style.
+- **When pictures can't be made** (turned off, no key, Gemini's image quota
+  used up, or an error), the TV just shows the mood layer, and only the
+  laptop page says why.
+- **Older campaigns** with no `scenes/` folder show the mood layer until a
+  picture is made or dropped in.
+- **Trying image generation on your key** (dry run by default; `--send`
+  spends one image request per picture):
+
+```bash
+python $DISPLAY/scene_trial.py                 # print the requests, make none
+python $DISPLAY/scene_trial.py --send          # make the six sample places
+python $DISPLAY/scene_trial.py list-models     # image models the key can use (no quota)
+```
+
 ## How it works
 
 | Component | Role |

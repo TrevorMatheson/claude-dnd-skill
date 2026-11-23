@@ -19,6 +19,12 @@ From the first live table test (see `docs/ROADMAP.md`).
 - Player characters have voices; with "Read player actions aloud" on, typed actions are read in the character's voice before the DM answers (Talk isn't read back).
 - Rolling initiative starts combat mode and `combat.py end` finishes it.
 
+**Scene backgrounds (on `/tv`)**
+- Every scene type has its own animated mood layer (fog banks, embers, rain, light shafts, firelight flicker, glowing motes, …), crossfading when the scene changes.
+- A turn can name the place (`"location": {"name", "look"}` in `send.py --turn`); `/tv` shows a picture of it under the mood layer, darkened and softened behind the narration so body text keeps at least 4.5:1 contrast (measured, with automatic dimming). In combat the map's area stays plain and the picture shows only behind the narration.
+- Pictures come from `<campaign>/scenes/` (yours always win) or are made by Gemini's image model in the background on the voice's key, once per place, saved and reused; `"renew": true` remakes one. `/layout` turns this on or off per campaign and picks the art style. With generation off, no key, the quota used up or an error, the TV shows the mood layer and only the laptop says why.
+- `scene_trial.py` tries image generation on your key (a dry run unless `--send`) and shows the results on `/tv`.
+
 **Table safety**
 - The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
 - plugin.json / marketplace.json / SKILL.md versions match VERSION again (they said 2.4.0), with a test.
