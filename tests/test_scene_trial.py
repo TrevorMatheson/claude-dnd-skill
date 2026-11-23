@@ -494,5 +494,323 @@ class TestGenerate(SceneTestBase):
         self.assertNotIn(FAKE_KEY, str(cm.exception))
 
 
+
+# ---------------------------------------------------------------------------
+# S7: `scene_trial.py show` puts the trial images on /tv (AC1, AC6, D12).
+#
+# Interface these tests pin (plan S7):
+#   scene_trial.main(["show", "--images", DIR, "--campaign-root", SCRATCH,
+#                     "--pause", SECONDS, "--only", N]) -> int
+#   * places come from DIR/index.json ({slug: {name, look, style, model, file}},
+#     written by --send), in its order; without an index.json, from the PNGs
+#     in DIR whose stem is the slug of a SAMPLE_LOCATIONS name (name and look
+#     taken from SAMPLE_LOCATIONS). Other files are ignored.
+#   * each image is copied, as a user file, into
+#     SCRATCH/campaigns/scene-trial/scenes/<slug>.png, and the display finds it
+#     for that turn's location (scene_images.find_image(camp, slug(name))).
+#   * the first post is /stats {"campaign": "scene-trial"}; then, per place,
+#     one send.send_turn(turn) whose turn has "location": {name, look} and
+#     three plain narration blocks. Every post goes through send._post.
+#   * --pause S (default 20) is waited between places, not after the last;
+#     tests pass 0. --only N (1-based) shows just the Nth place.
+#   * no images, no images folder, or --only out of range: exit 2, nothing
+#     posted.
+# ---------------------------------------------------------------------------
+
+_saved_argv = sys.argv
+sys.argv = ["send.py"]
+import send  # noqa: E402
+import scene_images  # noqa: E402
+sys.argv = _saved_argv
+
+TRIAL_CAMPAIGN = "scene-trial"
+
+
+def _png_variant(i: int) -> bytes:
+    """Distinct bytes per image (a PNG header plus a marker) so a copy can be
+    traced back to its source."""
+    return PNG_BYTES + f"trial-image-{i}".encode("ascii")
+
+
+class _PostRecorder:
+    """Stands in for send._post: records (url, payload) and answers OK."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, url, data, token):
+        self.calls.append((url, json.loads(data.decode("utf-8"))))
+        return True
+
+    def chunks(self):
+        return [p for u, p in self.calls if u == send.FLASK_URL]
+
+    def stats(self):
+        return [p for u, p in self.calls if u == send.STATS_URL]
+
+    def places(self):
+        return [p["place"] for p in self.stats() if p.get("place")]
+
+
+class TestShow(SceneTestBase):
+    """S7: `show` builds the scratch campaign and sends one turn per place."""
+
+    def setUp(self):
+        super().setUp()
+        self.images = self.tmp / "images"
+        self.images.mkdir()
+        self.scratch = self.tmp / "scratch-root"
+        self.camp = self.scratch / "campaigns" / TRIAL_CAMPAIGN
+        self.rec = _PostRecorder()
+        self.turns = []      # (turn, exit code) for every send.send_turn call
+        self.sleeps = []
+        real_send_turn = send.send_turn
+
+        def spy_send_turn(turn, *a, **k):
+            code = real_send_turn(turn, *a, **k)
+            self.turns.append((json.loads(json.dumps(turn)), code))
+            return code
+
+        send._SEND_LOG.clear()
+        for p in (mock.patch.object(send, "_post", self.rec),
+                  mock.patch.object(send, "send_turn", spy_send_turn),
+                  mock.patch("time.sleep", side_effect=lambda s: self.sleeps.append(s))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    # helpers
+
+    def write_index(self, entries):
+        """entries: list of (slug, name, look, style, bytes). Writes the PNGs
+        and an index.json like --send does, in that order."""
+        index = {}
+        for slug, name, look, style, data in entries:
+            (self.images / f"{slug}.png").write_bytes(data)
+            index[slug] = {"name": name, "look": look, "style": style,
+                           "model": "gemini-2.5-flash-image", "file": f"{slug}.png"}
+        (self.images / "index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
+        return index
+
+    def six_entries(self):
+        return [(SIX_SLUGS[i], SIX[i]["name"], SIX[i]["look"], "painterly", _png_variant(i))
+                for i in range(6)]
+
+    def show(self, *extra, pause="0"):
+        argv = ["show", "--images", str(self.images), "--campaign-root", str(self.scratch)]
+        if pause is not None:
+            argv += ["--pause", pause]
+        return self.run_main(argv + list(extra))
+
+    def sent_locations(self):
+        return [t.get("location") for t, _ in self.turns]
+
+    # tests
+
+    def test_show_sends_one_valid_turn_per_place(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.turns), 6, "one send.send_turn per place")
+        for turn, rc in self.turns:
+            self.assertEqual(rc, 0, f"send.send_turn refused the turn: {turn}")
+            # The same validation send.py applies before posting.
+            self.assertIsNotNone(send._turn_location(turn))
+            payloads = [p for b in turn["blocks"] for p in send._turn_block_payloads(b)]
+            for p in payloads:
+                self.assertEqual(send._validate_payload(p, "chunk"), [], p)
+
+    def test_turns_carry_location_from_index_in_order(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        want = [{"name": loc["name"], "look": loc["look"]} for loc in SIX]
+        self.assertEqual(self.sent_locations(), want)
+        self.assertEqual(self.rec.places(), want,
+                         "each place rides a /stats post as 'place', in index order")
+
+    def test_each_turn_has_three_plain_narration_paragraphs(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.turns), 6)
+        for turn, _ in self.turns:
+            blocks = turn.get("blocks") or []
+            self.assertEqual(len(blocks), 3, f"three sample paragraphs: {blocks}")
+            for b in blocks:
+                self.assertIsInstance(b, dict)
+                self.assertTrue(str(b.get("text", "")).strip())
+                for tag in ("action", "player", "npc", "dice", "tutor", "type"):
+                    self.assertNotIn(tag, b, f"narration only, not {tag}: {b}")
+        for chunk in self.rec.chunks():
+            for tag in ("action", "player", "npc", "dice", "tutor"):
+                self.assertNotIn(tag, chunk)
+        self.assertGreaterEqual(len(self.rec.chunks()), 18)
+
+    def test_campaign_set_active_first(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(self.rec.calls, "nothing was posted")
+        url, payload = self.rec.calls[0]
+        self.assertEqual(url, send.STATS_URL)
+        self.assertEqual(payload.get("campaign"), TRIAL_CAMPAIGN)
+
+    def test_posts_are_ordered_place_by_place(self):
+        self.write_index(self.six_entries()[:3])
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        # After the campaign post: chunks for place 1, its place stats, chunks
+        # for place 2, ... never a chunk of place 2 before place 1's stats.
+        seq = []
+        for url, p in self.rec.calls[1:]:
+            if url == send.FLASK_URL:
+                seq.append("c")
+            elif url == send.STATS_URL and p.get("place"):
+                seq.append("P:" + p["place"]["name"])
+        names = [SIX[i]["name"] for i in range(3)]
+        for n in names:
+            self.assertIn("P:" + n, seq)
+        place_idx = [seq.index("P:" + n) for n in names]
+        self.assertEqual(place_idx, sorted(place_idx))
+        self.assertTrue(all(x == "c" for x in seq[:place_idx[0]]))
+        self.assertGreaterEqual(place_idx[0], 3)
+        for a, b in zip(place_idx, place_idx[1:]):
+            self.assertGreaterEqual(b - a - 1, 3, "three paragraphs between places")
+
+    def test_only_posts_go_through_send_post(self):
+        # urlopen and sockets raise (SceneTestBase); every post must be the
+        # faked send._post, to the display's /chunk or /stats.
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(self.rec.calls)
+        for url, _ in self.rec.calls:
+            self.assertIn(url, (send.FLASK_URL, send.STATS_URL))
+
+    def test_files_copied_by_slug_as_user_files(self):
+        entries = self.six_entries()
+        self.write_index(entries)
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        scenes = self.camp / "scenes"
+        self.assertTrue(scenes.is_dir(), f"no {scenes}")
+        for slug, name, _, _, data in entries:
+            self.assertEqual((scenes / f"{slug}.png").read_bytes(), data, slug)
+            found = scene_images.find_image(self.camp, scene_images.slug(name))
+            self.assertIsNotNone(found, f"the display would not find {name}'s picture")
+            path, source = found
+            self.assertEqual(source, "user")
+            self.assertEqual(pathlib.Path(path).read_bytes(), data)
+        # The source folder is left as it was.
+        self.assertEqual(sorted(p.name for p in self.images.iterdir()),
+                         sorted([e[0] + ".png" for e in entries] + ["index.json"]))
+
+    def test_style_variants_each_show_their_own_picture(self):
+        # A two-style trial: index slugs carry the style; the place name repeats.
+        entries = [("the-rusty-flagon--oil-painting", "The Rusty Flagon", SIX[0]["look"],
+                    "oil painting", _png_variant(10)),
+                   ("the-rusty-flagon--ink-wash", "The Rusty Flagon", SIX[0]["look"],
+                    "ink wash", _png_variant(11))]
+        self.write_index(entries)
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.turns), 2)
+        names = [loc["name"] for loc in self.sent_locations()]
+        self.assertEqual(len(set(scene_images.slug(n) for n in names)), 2,
+                         f"two style variants need two place names the display tells apart: {names}")
+        for (_, _, _, _, data), name in zip(entries, names):
+            found = scene_images.find_image(self.camp, scene_images.slug(name))
+            self.assertIsNotNone(found, name)
+            self.assertEqual(pathlib.Path(found[0]).read_bytes(), data,
+                             f"{name} would show the wrong picture")
+
+    def test_falls_back_to_sample_locations_without_index(self):
+        samples = self.scene_trial.SAMPLE_LOCATIONS
+        slugs = [scene_images.slug(s["name"]) for s in samples]
+        for i, s in enumerate(slugs[:3]):
+            (self.images / f"{s}.png").write_bytes(_png_variant(i))
+        (self.images / "not-a-sample-place.png").write_bytes(_png_variant(99))
+        (self.images / "notes.txt").write_text("ignore me", encoding="utf-8")
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.sent_locations(),
+                         [{"name": s["name"], "look": s["look"]} for s in samples[:3]])
+        for i in range(3):
+            found = scene_images.find_image(self.camp, slugs[i])
+            self.assertIsNotNone(found)
+            self.assertEqual(pathlib.Path(found[0]).read_bytes(), _png_variant(i))
+
+    def test_only_shows_the_nth_place(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show("--only", "3")
+        self.assertEqual(code, 0, out + err)
+        want = [{"name": SIX[2]["name"], "look": SIX[2]["look"]}]
+        self.assertEqual(self.sent_locations(), want)
+        self.assertEqual(self.rec.places(), want)
+
+    def test_only_out_of_range_refuses_and_posts_nothing(self):
+        self.write_index(self.six_entries())
+        for n in ("0", "7"):
+            self.rec.calls.clear()
+            code, out, err = self.show("--only", n)
+            self.assertEqual(code, 2, f"--only {n}: {out + err}")
+            self.assertEqual(self.rec.calls, [], f"--only {n} posted")
+
+    def test_no_images_refuses_and_posts_nothing(self):
+        code, out, err = self.show()
+        self.assertEqual(code, 2, out + err)
+        self.assertEqual(self.rec.calls, [])
+        self.assertEqual(self.turns, [])
+
+    def test_missing_images_folder_refuses(self):
+        self.images.rmdir()
+        code, out, err = self.show()
+        self.assertEqual(code, 2, out + err)
+        self.assertEqual(self.rec.calls, [])
+
+    def test_pause_waited_between_places_not_after_last(self):
+        self.write_index(self.six_entries()[:3])
+        code, out, err = self.show(pause="7")
+        self.assertEqual(code, 0, out + err)
+        waits = [s for s in self.sleeps if s >= 1]
+        self.assertEqual(waits, [7, 7], f"a 7 s wait between 3 places, none after: {self.sleeps}")
+
+    def test_default_pause_is_twenty_seconds(self):
+        self.write_index(self.six_entries()[:2])
+        code, out, err = self.show(pause=None)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual([s for s in self.sleeps if s >= 1], [20], self.sleeps)
+
+    def test_pause_zero_does_not_wait(self):
+        self.write_index(self.six_entries())
+        code, out, err = self.show(pause="0")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual([s for s in self.sleeps if s > 0], [])
+
+    def test_show_needs_no_gemini_key_and_makes_no_image_requests(self):
+        # The base class cleared the keys; urlopen raises if Gemini is called.
+        self.write_index(self.six_entries())
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("image requests", out)
+
+    def test_show_does_not_touch_the_default_trial_out_folder(self):
+        fake_tmp = self.tmp / "systemp"
+        fake_tmp.mkdir()
+        self.write_index(self.six_entries()[:1])
+        with mock.patch.object(tempfile, "tempdir", str(fake_tmp)):
+            code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(list(fake_tmp.iterdir()), [])
+
+    def test_show_rerun_is_safe(self):
+        self.write_index(self.six_entries())
+        self.assertEqual(self.show()[0], 0)
+        self.rec.calls.clear()
+        self.turns.clear()
+        code, out, err = self.show()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.turns), 6)
+
 if __name__ == "__main__":
     unittest.main()

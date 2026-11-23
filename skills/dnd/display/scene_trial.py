@@ -12,20 +12,30 @@ how many, and makes none.
   python scene_trial.py --style "ink wash" --style "oil painting"   # compare styles
   python scene_trial.py --locations my_places.json                  # your own places
   python scene_trial.py list-models           # which image models the key sees (no quota)
+  python scene_trial.py show --images <out> --campaign-root <scratch root>
+                                              # put them on a running /tv (no quota)
 
 --locations FILE is a JSON list of {"name": "...", "look": "..."}: the look is
 what the party sees on arriving, the place and never the people in it.
 Images go to <out>/<slug>.png (default <temp>/mydm-scene-trial) with an
 index.json; ones already there are skipped unless --again. A 429 stops the
 run at once.
+
+`show` copies the images into a scratch campaign "scene-trial" (under
+--campaign-root, which must be the display's DND_CAMPAIGN_ROOT), makes it
+active, and sends one turn per place with sample narration, --pause seconds
+apart, so each picture can be judged on /tv behind text. It reaches the
+display named by DND_DISPLAY_URL and never calls Gemini.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +74,99 @@ SAMPLE_LOCATIONS = [
 ]
 
 
+SHOW_CAMPAIGN = "scene-trial"
+SHOW_PAUSE = 20.0
+
+
+def _narration(name: str, look: str) -> list:
+    """Three paragraphs of sample narration to read the picture behind."""
+    return [
+        f"You arrive at {name}. {look[:1].upper() + look[1:] if look else 'It is quiet.'}",
+        "For a moment nobody speaks. The air is cold and still, and every small sound "
+        "carries further than it should; somewhere a draught moves, and the light shifts "
+        "with it.",
+        "Whatever happened here happened a long time ago, but it has not quite finished. "
+        "What do you do?",
+    ]
+
+
+def _show_places(images: Path) -> list:
+    """[(name, look, file)] in order: from index.json, else the sample places
+    whose slug-named PNG is in the folder."""
+    places = []
+    index_path = images / "index.json"
+    index = None
+    if index_path.is_file():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            index = None
+    if isinstance(index, dict):
+        names = [str((v or {}).get("name", "")) for v in index.values() if isinstance(v, dict)]
+        for key, v in index.items():
+            if not isinstance(v, dict):
+                continue
+            f = images / str(v.get("file") or f"{key}.png")
+            if not f.is_file():
+                continue
+            name = str(v.get("name") or key).strip()
+            # Two styles of one place need their own names, so each finds its picture.
+            if names.count(name) > 1 and v.get("style"):
+                name = f"{name} ({v['style']})"
+            places.append((name, str(v.get("look") or ""), f))
+        return places
+    for loc in SAMPLE_LOCATIONS:
+        f = images / f"{scene_images.slug(loc['name'])}.png"
+        if f.is_file():
+            places.append((loc["name"], loc["look"], f))
+    return places
+
+
+def _show(args) -> int:
+    images = Path(args.images) if args.images else (Path(args.out) if args.out else _default_out())
+    if not images.is_dir():
+        print(f"scene_trial show: no images folder at {images}", file=sys.stderr)
+        return 2
+    if not args.campaign_root:
+        print("scene_trial show: --campaign-root is needed (the display's scratch "
+              "DND_CAMPAIGN_ROOT, never your real campaigns)", file=sys.stderr)
+        return 2
+    places = _show_places(images)
+    if not places:
+        print(f"scene_trial show: no trial images in {images}", file=sys.stderr)
+        return 2
+    if args.only is not None:
+        if not 1 <= args.only <= len(places):
+            print(f"scene_trial show: --only must be 1-{len(places)}", file=sys.stderr)
+            return 2
+        places = [places[args.only - 1]]
+
+    camp = Path(args.campaign_root) / "campaigns" / SHOW_CAMPAIGN
+    scenes = camp / "scenes"
+    scenes.mkdir(parents=True, exist_ok=True)
+    state = camp / "state.md"
+    if not state.exists():
+        state.write_text("# Scene trial\n\nA scratch campaign for the scene-background trial.\n",
+                         encoding="utf-8")
+    for name, _look, f in places:
+        shutil.copyfile(f, scenes / f"{scene_images.slug(name)}.png")
+
+    import send  # the display client; reaches DND_DISPLAY_URL
+    send._post(send.STATS_URL, json.dumps({"campaign": SHOW_CAMPAIGN}).encode("utf-8"),
+               send._read_token())
+    for i, (name, look, _f) in enumerate(places):
+        if i and args.pause > 0:
+            time.sleep(args.pause)
+        turn = {"blocks": [{"text": t} for t in _narration(name, look)],
+                "location": {"name": name, "look": look[:400]}}
+        print(f"Showing {name}", flush=True)
+        rc = send.send_turn(turn)
+        if rc:
+            print(f"scene_trial show: the display refused {name} (exit {rc})", file=sys.stderr)
+            return rc
+    return 0
+
+
 def _default_out() -> Path:
     return Path(tempfile.gettempdir()) / "mydm-scene-trial"
 
@@ -97,8 +200,9 @@ def _jobs(locs: list, styles: list) -> list:
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="scene_trial.py", description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("command", nargs="?", choices=["list-models"],
-                   help="list-models: show the image models the key can use (no quota spent)")
+    p.add_argument("command", nargs="?", choices=["list-models", "show"],
+                   help="list-models: the image models the key can use (no quota spent); "
+                        "show: put made images on a running /tv")
     p.add_argument("--locations", help="JSON list of {name, look} (default: six samples)")
     p.add_argument("--style", action="append", help="art style text; repeat to compare styles")
     p.add_argument("--out", help="output folder (default: <temp>/mydm-scene-trial)")
@@ -107,6 +211,11 @@ def _parser() -> argparse.ArgumentParser:
                    help=f"refuse to make more than this many requests (default {DEFAULT_MAX})")
     p.add_argument("--send", action="store_true", help="really make the requests (spends quota)")
     p.add_argument("--again", action="store_true", help="remake images that already exist")
+    p.add_argument("--images", help="show: the folder of images (default: the --out folder)")
+    p.add_argument("--campaign-root", help="show: the display's DND_CAMPAIGN_ROOT (a scratch copy)")
+    p.add_argument("--pause", type=float, default=SHOW_PAUSE,
+                   help=f"show: seconds between places (default {SHOW_PAUSE:g})")
+    p.add_argument("--only", type=int, help="show: only the Nth place (from 1)")
     return p
 
 
@@ -131,6 +240,8 @@ def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "list-models":
         return _list_models()
+    if args.command == "show":
+        return _show(args)
 
     try:
         locs = _load_locations(args.locations) if args.locations else list(SAMPLE_LOCATIONS)
