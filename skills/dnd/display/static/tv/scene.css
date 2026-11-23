@@ -1,0 +1,7 @@
+/* Scene backgrounds (spec D1, D8-D10): the mood layer's soft canvas, and
+   (from S5) the place picture, its tint and the narration scrim. Kept out of
+   tv.css so the background's rules live in one place. */
+
+/* Fog banks, light shafts and flicker: drawn at half resolution by bg.js,
+   just under the sharp particles. */
+#mood-soft { position: absolute; inset: 0; pointer-events: none; }

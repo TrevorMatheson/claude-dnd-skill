@@ -1,11 +1,15 @@
-// The scene background for the TV page (display foundation spec D14):
-// the old page's gradient crossfade, particles and sky, copied unchanged
-// from templates/index.html (lines 4445-5027) as a placeholder until the
-// Scene backgrounds spec replaces this layer. Exposes TV.bg.applyScene(scene)
-// and TV.bg.setWorldTime(wt).
+// The TV background (display foundation D14, scene backgrounds spec D1, D2,
+// D10, AC2): the scene's gradient, the sky, and the mood layer — 2-4
+// animated layers per scene type from mood.js, crossfading when the scene
+// changes. Soft layers (fog banks, light shafts, flicker) are drawn on a
+// half-resolution canvas; particles are drawn sharp on #particles.
+// Exposes TV.bg.applyScene(scene) and TV.bg.setWorldTime(wt).
 (function () {
 'use strict';
 if (typeof document === 'undefined') return;   // loaded by node tests: nothing to draw
+
+const MOOD = (window.TV && window.TV.mood) || null;
+const FADE_MS = 2500;   // matches .bg-layer's opacity transition in tv.css
 
 // ═══════════════════════════════════════════════════════════════════
 // SCENE MANAGEMENT
@@ -28,11 +32,13 @@ function applyScene(scene) {
 
   // Update scene indicator with a fade
   const indicator = document.getElementById('scene-indicator');
-  indicator.classList.add('changing');
-  setTimeout(() => {
-    indicator.textContent = '— ' + (activeScene.label || activeScene.name) + ' —';
-    indicator.classList.remove('changing');
-  }, 400);
+  if (indicator) {
+    indicator.classList.add('changing');
+    setTimeout(() => {
+      indicator.textContent = '— ' + (activeScene.label || activeScene.name) + ' —';
+      indicator.classList.remove('changing');
+    }, 400);
+  }
 
   // Crossfade background layers
   const incoming = bgActive === 'a' ? 'b' : 'a';
@@ -46,9 +52,8 @@ function applyScene(scene) {
   outEl.style.opacity = '0';
   bgActive = incoming;
 
-  // Switch particle type
-  particleSystem.switchType(activeScene.particles, activeScene.accent);
-  // no audio hook on scene change — ambient removed
+  // Crossfade the mood layer to the new scene's recipe.
+  mood.switchTo(activeScene);
 }
 
 // Initialise background to default scene
@@ -61,25 +66,42 @@ function applyScene(scene) {
 
 
 // ═══════════════════════════════════════════════════════════════════
-// PARTICLE SYSTEM
+// CANVASES
 // ═══════════════════════════════════════════════════════════════════
 
 const canvas  = document.getElementById('particles');
 const ctx     = canvas.getContext('2d');
+// The soft layers' canvas sits just under #particles, at half resolution.
+const softCanvas = document.createElement('canvas');
+softCanvas.id = 'mood-soft';
+softCanvas.setAttribute('aria-hidden', 'true');
+canvas.parentNode.insertBefore(softCanvas, canvas);
+const sctx = softCanvas.getContext('2d');
 let W = 0, H = 0;
+let moodReady = false;
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   W = window.innerWidth;
   H = window.innerHeight;
-  canvas.width  = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
   canvas.style.width  = W + 'px';
   canvas.style.height = H + 'px';
-  ctx.scale(dpr, dpr);
+  // setTransform, not scale: scale would build up on every resize.
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const half = dpr / 2;
+  softCanvas.width  = Math.max(1, Math.round(W * half));
+  softCanvas.height = Math.max(1, Math.round(H * half));
+  softCanvas.style.width  = W + 'px';
+  softCanvas.style.height = H + 'px';
+  sctx.setTransform(half, 0, 0, half, 0, 0);
+  if (moodReady) mood.rebudget();
 }
 window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
+
+// The weight of the mood being drawn (0-1), set by the mood system per set.
+let drawWeight = 1;
 
 // ── Particle classes ──────────────────────────────────────────────
 
@@ -93,9 +115,10 @@ function hexToRgb(hex) {
 }
 
 class Particle {
-  constructor(type, accent) {
+  constructor(type, accent, color) {
     this.type   = type;
     this.accent = accent;
+    this.color  = color;   // the recipe's colour, if it sets one
     this.reset();
   }
   reset() {
@@ -222,6 +245,14 @@ class Particle {
       this.size = rand(6, 22);
       this.maxLife = rand(100, 220);
       this._color = '#4888c0';
+    } else if (T === 'glowmotes') {
+      this.x = rand(0, W);
+      this.y = rand(H * 0.1, H * 0.95);
+      this.vx = rand(-0.12, 0.12);
+      this.vy = rand(-0.18, -0.03);
+      this.size = rand(1.5, 3.5);
+      this.maxLife = rand(400, 900);
+      this._color = '#ffd080';
     } else {
       // fallback = dust
       this.vx = 0; this.vy = 0;
@@ -229,6 +260,7 @@ class Particle {
       this.maxLife = 300;
       this._color = '#808080';
     }
+    if (this.color) this._color = this.color;
   }
 
   update() {
@@ -267,6 +299,10 @@ class Particle {
       this.vx = Math.max(-1.2, Math.min(1.2, this.vx));
     } else if (T === 'ripples') {
       this.size += 0.55;
+    } else if (T === 'glowmotes') {
+      this._phase += 0.02;
+      this.x += Math.sin(this._phase) * 0.25;
+      this.alpha *= (0.55 + 0.45 * Math.sin(this._phase * 1.7));
     }
 
     return this.life < this.maxLife;
@@ -275,7 +311,7 @@ class Particle {
   draw(ctx) {
     const T = this.type;
     const [r,g,b] = hexToRgb(this._color);
-    ctx.globalAlpha = Math.max(0, Math.min(1, this.alpha));
+    ctx.globalAlpha = Math.max(0, Math.min(1, this.alpha)) * drawWeight;
 
     if (T === 'smoke') {
       const grad = ctx.createRadialGradient(
@@ -285,6 +321,15 @@ class Particle {
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (T === 'glowmotes') {
+      const mote = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 6);
+      mote.addColorStop(0, `rgba(${r},${g},${b},0.55)`);
+      mote.addColorStop(0.35, `rgba(${r},${g},${b},0.18)`);
+      mote.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = mote;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * 6, 0, Math.PI * 2);
       ctx.fill();
     } else if (T === 'embers' || T === 'fireflies' || T === 'sparks') {
       // Glow effect
@@ -353,70 +398,167 @@ class Particle {
   }
 }
 
-// ── Particle system controller ────────────────────────────────────
+// ── Soft layers: fog banks, light shafts, flicker ────────────────────
 
-const PARTICLE_COUNT = {
-  embers: 80, fireflies: 45, smoke: 20, dust: 90,
-  snow: 110, stars: 160, bubbles: 45, sparks: 50,
-  sand: 80, rain: 130, drips: 35,
-  mist: 12, leaves: 55, ripples: 18,
-};
-
-const particleSystem = {
-  particles: [],
-  type: 'embers',
-  accent: SCENE_DEFAULTS.accent,
-  transitioning: false,
-
-  init() {
-    this.populate(this.type, this.accent);
-  },
-
-  populate(type, accent) {
-    const count = PARTICLE_COUNT[type] || 60;
-    this.particles = [];
-    for (let i = 0; i < count; i++) {
-      const p = new Particle(type, accent);
-      p.life = randInt(0, p.maxLife);  // stagger so they don't all start together
-      this.particles.push(p);
+class SoftLayer {
+  constructor(layer) {
+    this.kind  = layer.kind;
+    this.color = layer.color || '#808080';
+    this.alpha = Number(layer.alpha) > 0 ? Number(layer.alpha) : 0.08;
+    this.x = Number.isFinite(layer.x) ? layer.x : 0.5;
+    this.y = Number.isFinite(layer.y) ? layer.y : 0.9;
+    const n = this.kind === 'flicker' ? 1 : Math.max(1, Math.round(Number(layer.count) || 2));
+    this.items = Array.from({ length: n }, (_, i) => this._item(i, n));
+    this.t = rand(0, 1000);
+  }
+  _item(i, n) {
+    if (this.kind === 'fogbank') {
+      return { x: rand(-0.3, 1.0), y: 0.55 + 0.4 * (i + 0.5) / n + rand(-0.05, 0.05),
+               w: rand(0.5, 0.9), h: rand(0.12, 0.22), v: rand(0.00004, 0.00012) * (i % 2 ? -1 : 1) };
     }
-  },
-
-  switchType(newType, accent) {
-    if (newType === this.type) return;
-    this.type   = newType;
-    this.accent = accent || '#ffffff';
-    // Fade out current by letting them die, then repopulate
-    // Mark old particles so they run out fast
-    this.particles.forEach(p => { p.life = Math.max(p.life, p.maxLife - 30); });
-    // Add new particles over ~2s
-    let added = 0;
-    const target = PARTICLE_COUNT[newType] || 60;
-    const interval = setInterval(() => {
-      if (added >= target) { clearInterval(interval); return; }
-      const p = new Particle(newType, this.accent);
-      this.particles.push(p);
-      added++;
-    }, 2000 / target);
-  },
-
+    if (this.kind === 'shafts') {
+      return { x: 0.15 + 0.7 * (i + 0.5) / n + rand(-0.06, 0.06), w: rand(0.05, 0.11),
+               lean: rand(0.12, 0.22), ph: rand(0, Math.PI * 2), sp: rand(0.002, 0.005) };
+    }
+    return {};
+  }
   update() {
-    this.particles = this.particles.filter(p => p.update());
-    // Replenish
-    const target = PARTICLE_COUNT[this.type] || 60;
-    while (this.particles.length < target) {
-      const p = new Particle(this.type, this.accent);
-      this.particles.push(p);
+    this.t += 1;
+    if (this.kind === 'fogbank') {
+      for (const f of this.items) {
+        f.x += f.v;
+        if (f.x > 1.2) f.x = -f.w - 0.1;
+        if (f.x < -f.w - 0.2) f.x = 1.1;
+      }
+    } else if (this.kind === 'shafts') {
+      for (const s of this.items) s.ph += s.sp;
     }
-  },
+  }
+  draw(c) {
+    const [r, g, b] = hexToRgb(this.color);
+    c.globalAlpha = drawWeight;
+    if (this.kind === 'fogbank') {
+      for (const f of this.items) {
+        const cx = (f.x + f.w / 2) * W, cy = f.y * H, rx = f.w * W / 2, ry = f.h * H / 2;
+        const grad = c.createRadialGradient(cx, cy, 0, cx, cy, rx);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${this.alpha})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        c.fillStyle = grad;
+        c.beginPath();
+        c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        c.fill();
+      }
+    } else if (this.kind === 'shafts') {
+      for (const s of this.items) {
+        const a = this.alpha * (0.6 + 0.4 * Math.sin(s.ph));
+        const x0 = s.x * W, w = s.w * W, lean = s.lean * W;
+        const grad = c.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${a})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        c.fillStyle = grad;
+        c.beginPath();
+        c.moveTo(x0, 0); c.lineTo(x0 + w, 0);
+        c.lineTo(x0 + w * 2.2 + lean, H); c.lineTo(x0 + lean, H);
+        c.closePath();
+        c.fill();
+      }
+    } else if (this.kind === 'flicker') {
+      // A wavering glow: two slow sines and a little jitter, like a fire.
+      const k = 0.78 + 0.12 * Math.sin(this.t * 0.07) + 0.07 * Math.sin(this.t * 0.23) + rand(-0.03, 0.03);
+      const cx = this.x * W, cy = this.y * H, rad = Math.max(W, H) * 0.55;
+      const grad = c.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      grad.addColorStop(0, `rgba(${r},${g},${b},${(this.alpha * k).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      c.fillStyle = grad;
+      c.fillRect(0, 0, W, H);
+    }
+    c.globalAlpha = 1;
+  }
+}
 
-  draw() {
+// ── One scene's mood: its recipe's layers, budgeted for this screen ──
+
+const FALLBACK_RECIPE = { layers: [{ kind: 'dust', count: 60 }, { kind: 'embers', count: 40 }] };
+const SOFT = MOOD ? MOOD.SOFT_KINDS : ['fogbank', 'shafts', 'flicker'];
+
+class MoodSet {
+  constructor(scene) {
+    this.scene  = scene;
+    this.recipe = MOOD ? MOOD.recipeFor(scene) : FALLBACK_RECIPE;
+    this.layers = [];
+    this.build();
+  }
+  // (Re)build for the current screen size, keeping what is already drawn.
+  build() {
+    const r = MOOD ? MOOD.budget(this.recipe, W, H) : this.recipe;
+    const old = this.layers;
+    this.layers = r.layers.map((l, i) => {
+      if (SOFT.includes(l.kind)) return (old[i] && old[i].soft) ? old[i] : { soft: new SoftLayer(l) };
+      const keep = (old[i] && old[i].particles) ? old[i].particles.slice(0, l.count) : [];
+      return { kind: l.kind, color: l.color, target: l.count, particles: keep };
+    });
+    for (const l of this.layers) {
+      if (!l.particles) continue;
+      while (l.particles.length < l.target) {
+        const p = new Particle(l.kind, this.scene.accent, l.color);
+        p.life = randInt(0, p.maxLife);   // stagger so they don't all start together
+        l.particles.push(p);
+      }
+    }
+  }
+  update() {
+    for (const l of this.layers) {
+      if (l.soft) { l.soft.update(); continue; }
+      l.particles = l.particles.filter(p => p.update());
+      while (l.particles.length < l.target) l.particles.push(new Particle(l.kind, this.scene.accent, l.color));
+    }
+  }
+  draw(weight) {
+    drawWeight = weight;
+    for (const l of this.layers) {
+      if (l.soft) l.soft.draw(sctx);
+      else for (const p of l.particles) p.draw(ctx);
+    }
+    drawWeight = 1;
+  }
+}
+
+// ── The mood system: at most two moods live, crossfading ─────────────
+
+const mood = (() => {
+  const mixer = MOOD ? MOOD.makeMixer(FADE_MS) : null;
+  const sets = new Map();   // scene name -> MoodSet
+  let current = SCENE_DEFAULTS.name;
+
+  function switchTo(scene) {
+    const name = scene.name || 'unknown';
+    if (!sets.has(name)) sets.set(name, new MoodSet(scene));
+    current = name;
+    if (mixer) mixer.set(name, performance.now());
+  }
+
+  function frame(now) {
     ctx.clearRect(0, 0, W, H);
-    this.particles.forEach(p => p.draw(ctx));
-  },
-};
+    sctx.clearRect(0, 0, W, H);
+    const ws = mixer ? mixer.weights(now) : [{ name: current, w: 1 }];
+    const live = new Set(ws.map(e => e.name));
+    for (const name of [...sets.keys()]) if (!live.has(name)) sets.delete(name);
+    for (const e of ws) {
+      const set = sets.get(e.name);
+      if (!set) continue;
+      set.update();
+      if (e.w > 0.001) set.draw(e.w);
+    }
+  }
 
-particleSystem.init();
+  function rebudget() { for (const s of sets.values()) s.build(); }
+
+  return { switchTo, frame, rebudget, weights: now => (mixer ? mixer.weights(now) : []) };
+})();
+
+resizeCanvas();
+moodReady = true;
+mood.switchTo(SCENE_DEFAULTS);
 
 // ── Sky Renderer ──────────────────────────────────────────────────
 
@@ -583,17 +725,17 @@ const skyRenderer = (() => {
 
 // ── Animation loop ────────────────────────────────────────────────
 
-function loop() {
-  particleSystem.update();
-  particleSystem.draw();
+function loop(now) {
+  mood.frame(now || performance.now());
   skyRenderer.draw();
   requestAnimationFrame(loop);
 }
-loop();
+requestAnimationFrame(loop);
 
 const TV = (window.TV = window.TV || {});
 TV.bg = {
   applyScene,
   setWorldTime(wt) { try { skyRenderer.setState(wt); } catch (_) {} },
+  moodWeights() { return mood.weights(performance.now()); },
 };
 })();

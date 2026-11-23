@@ -12,11 +12,12 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/app_icon_32.png">
 <link rel="stylesheet" href="/static/tv/tokens.css">
 <link rel="stylesheet" href="/static/tv/tv.css">
+<link rel="stylesheet" href="/static/tv/scene.css">
 </head>
 <body>
 <main id="tv-stage" class="stage" data-mode="story">
-  <!-- Background (D14): the old page's scene layers, a placeholder until the
-       Scene backgrounds spec. Driven by bg.js. -->
+  <!-- Background (foundation D14): the scene's gradient, sky and mood layer
+       (scene backgrounds spec D1), driven by bg.js and mood.js. -->
   <div id="tv-bg" aria-hidden="true">
     <div id="bg-a" class="bg-layer"></div>
     <div id="bg-b" class="bg-layer"></div>
@@ -51,6 +52,7 @@
 <script src="/static/tv/layout.js"></script>
 <script src="/static/tv/panels.js"></script>
 <script src="/static/tv/map.js"></script>
+<script src="/static/tv/mood.js"></script>
 <script src="/static/tv/bg.js"></script>
 <script src="/static/tv/tv.js"></script>
 </body>
