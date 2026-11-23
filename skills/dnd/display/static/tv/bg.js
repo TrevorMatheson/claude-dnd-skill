@@ -54,6 +54,7 @@ function applyScene(scene) {
 
   // Crossfade the mood layer to the new scene's recipe.
   mood.switchTo(activeScene);
+  if (placeReady) place.retint();
 }
 
 // Initialise background to default scene
@@ -79,6 +80,7 @@ canvas.parentNode.insertBefore(softCanvas, canvas);
 const sctx = softCanvas.getContext('2d');
 let W = 0, H = 0;
 let moodReady = false;
+let placeReady = false;
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -723,6 +725,199 @@ const skyRenderer = (() => {
   };
 })();
 
+// ═══════════════════════════════════════════════════════════════════
+// PLACE PICTURE (scene backgrounds D1, D5, D8, D10, AC6)
+// ═══════════════════════════════════════════════════════════════════
+// Under the mood layer: two <img> layers that crossfade, a wash of the
+// scene's colours over them, and a blurred black scrim behind the
+// narration column whose strength is measured from the picture so body
+// text keeps 4.5:1 (WCAG AA) against it.
+
+const PLACE = (window.TV && window.TV.place) || null;
+const INK_LUM = PLACE ? PLACE.relLum(0xf1, 0xeb, 0xe1) : 0.83;   // --ink
+const PLACE_BRIGHT = 0.72;      // the picture is darkened (D8)
+const TINT_ALPHA = 0.35;        // the scene's colours over it
+const SCRIM_MIN = 0.22, SCRIM_MAX = 0.88;
+const SAMPLE_W = 160;           // the offscreen measuring canvas's width
+
+const place = (() => {
+  const host = document.getElementById('tv-bg');
+  const sky = document.getElementById('sky');
+  const before = sky;
+  const mk = (tag, cls) => { const e = document.createElement(tag); e.className = cls; e.setAttribute('aria-hidden', 'true'); return e; };
+  const imgs = { a: mk('img', 'place-img'), b: mk('img', 'place-img') };
+  imgs.a.id = 'place-a'; imgs.b.id = 'place-b';
+  imgs.a.alt = imgs.b.alt = '';
+  imgs.a.decoding = imgs.b.decoding = 'async';
+  const tint = mk('div', 'place-tint'); tint.id = 'place-tint';
+  const scrim = mk('div', 'place-scrim'); scrim.id = 'place-scrim';
+  host.insertBefore(imgs.a, before);
+  host.insertBefore(imgs.b, before);
+  host.insertBefore(tint, before);
+  host.insertBefore(scrim, before);
+  document.documentElement.style.setProperty('--place-bright', String(PLACE_BRIGHT));
+
+  const model = PLACE ? PLACE.makePlaceModel() : null;
+  let front = 'a';          // the img that is (or was last) showing
+  let shownUrl = null;      // the picture up now
+  let report = { image: null, scrim: 0, ratio: null, p95: null };
+  let lums = null;          // luminances behind the column, before the scrim
+
+  function act(a) {
+    if (!a) return;
+    if (a.action === 'show') load(a.url);
+    else if (a.action === 'clear') clear();
+  }
+
+  function load(url) {
+    if (url === shownUrl) return;
+    const back = front === 'a' ? 'b' : 'a';
+    const el = imgs[back];
+    el.onload = () => {
+      const a = model.loaded(url);
+      if (a && a.action === 'show' && el.dataset.url === url) reveal(back);
+    };
+    el.onerror = () => act(model.failed(url));
+    el.dataset.url = url;
+    el.src = url;
+  }
+
+  function reveal(back) {
+    const el = imgs[back];
+    const url = el.dataset.url;
+    imgs[front].classList.remove('on');
+    el.classList.add('on');
+    front = back;
+    shownUrl = url;
+    host.classList.add('has-place');
+    schedule();
+  }
+  function clear() {
+    imgs.a.classList.remove('on');
+    imgs.b.classList.remove('on');
+    shownUrl = null;
+    host.classList.remove('has-place');
+    lums = null;
+    report = { image: null, scrim: 0, ratio: null, p95: null };
+    applyMask(null);
+  }
+
+  function set(pl) {
+    if (model) act(model.set(pl));
+  }
+
+  // The wash follows the scene's colours (the mood colour over the picture).
+  function retint() {
+    const [top, bot] = activeScene.colors;
+    tint.style.background = `radial-gradient(ellipse at 50% 30%, ${top} 0%, ${bot} 100%)`;
+    if (shownUrl) schedule();
+  }
+
+  // ── Where the narration column is, and how dark the scrim must be ──
+
+  function rectOf(id) {
+    const el = document.getElementById(id);
+    if (!el || el.hidden) return null;
+    const r = el.getBoundingClientRect();
+    return (r.width > 0 && r.height > 0) ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+  }
+  function union(rs) {
+    rs = rs.filter(Boolean);
+    if (!rs.length) return null;
+    const x0 = Math.min(...rs.map(r => r.x)), y0 = Math.min(...rs.map(r => r.y));
+    const x1 = Math.max(...rs.map(r => r.x + r.w)), y1 = Math.max(...rs.map(r => r.y + r.h));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function column() {
+    return union([rectOf('tv-feed'), rectOf('tv-inputbar')]);
+  }
+
+  function measure() {
+    const img = imgs[front];
+    const col = column();
+    if (!shownUrl || !img.naturalWidth || !col) { placeScrim(col, SCRIM_MIN); return; }
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const k = SAMPLE_W / vw;
+    const cw = SAMPLE_W, ch = Math.max(1, Math.round(vh * k));
+    const c = document.createElement('canvas');
+    c.width = cw; c.height = ch;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    const r = PLACE.coverRect(img.naturalWidth, img.naturalHeight, cw, ch);
+    g.filter = `brightness(${PLACE_BRIGHT})`;
+    g.drawImage(img, r.x, r.y, r.w, r.h);
+    g.filter = 'none';
+    const [top, bot] = activeScene.colors;
+    const grad = g.createRadialGradient(cw / 2, ch * 0.3, 0, cw / 2, ch * 0.3, Math.max(cw, ch));
+    grad.addColorStop(0, top); grad.addColorStop(1, bot);
+    g.globalAlpha = TINT_ALPHA; g.fillStyle = grad; g.fillRect(0, 0, cw, ch); g.globalAlpha = 1;
+    const sx = Math.max(0, Math.floor(col.x * k)), sy = Math.max(0, Math.floor(col.y * k));
+    const sw = Math.max(1, Math.min(cw - sx, Math.ceil(col.w * k))), sh = Math.max(1, Math.min(ch - sy, Math.ceil(col.h * k)));
+    let data;
+    try { data = g.getImageData(sx, sy, sw, sh).data; } catch (_) { placeScrim(col, SCRIM_MAX); return; }
+    lums = [];
+    for (let i = 0; i < data.length; i += 4) lums.push(PLACE.relLum(data[i], data[i + 1], data[i + 2]));
+    const extra = currentExtraDim();
+    const a = Math.min(SCRIM_MAX, PLACE.scrimFor(lums, { ink: INK_LUM, target: 4.5, min: SCRIM_MIN, max: SCRIM_MAX }) + extra);
+    const p95 = PLACE.percentile(lums, 95);
+    const after = PLACE.toLinear(PLACE.toSrgb(p95) * (1 - a));
+    report = { image: shownUrl, scrim: +a.toFixed(3), ratio: +PLACE.contrastRatio(INK_LUM, after).toFixed(2), p95: +p95.toFixed(4) };
+    placeScrim(col, a);
+  }
+
+  function currentExtraDim() { return 0; }
+
+  function placeScrim(col, alpha) {
+    const pad = parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.5 || 40;
+    if (!col) { scrim.style.width = '0px'; applyMask(null); return; }
+    const x = Math.max(0, col.x - pad), w = Math.min(window.innerWidth - x, col.w + pad * 2);
+    scrim.style.left = x + 'px';
+    scrim.style.width = w + 'px';
+    document.documentElement.style.setProperty('--scrim', String(alpha));
+    applyMask(shownUrl ? { x: col.x, w: col.w } : null);
+  }
+
+  // Particles at half strength over the column while a picture is up, so
+  // they don't fight the text (the picture already carries the detail).
+  function applyMask(col) {
+    for (const el of [canvas, softCanvas]) {
+      if (!col) { el.style.maskImage = el.style.webkitMaskImage = ''; continue; }
+      const l = col.x, r = col.x + col.w;
+      const m = `linear-gradient(to right, #000 ${l}px, rgba(0,0,0,.5) ${l}px, rgba(0,0,0,.5) ${r}px, #000 ${r}px)`;
+      el.style.maskImage = m; el.style.webkitMaskImage = m;
+    }
+  }
+
+  let timer = null;
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(() => { try { measure(); } catch (err) { console.error('tv: place measure failed', err); } }, 120);
+  }
+
+  // Re-measure when the picture, the layout mode or the column's size changes.
+  const stage = document.getElementById('tv-stage');
+  if (stage && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(schedule).observe(stage, { attributes: true, attributeFilter: ['data-mode'] });
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(schedule);
+    for (const id of ['tv-feed', 'tv-inputbar', 'tv-party', 'tv-map']) {
+      const el = document.getElementById(id);
+      if (el) ro.observe(el);
+    }
+  }
+  window.addEventListener('resize', schedule);
+  schedule();
+
+  return {
+    set,
+    report: () => Object.assign({}, report),
+    remeasure: schedule,
+    retint,
+  };
+})();
+placeReady = true;
+place.retint();
+
 // ── Animation loop ────────────────────────────────────────────────
 
 function loop(now) {
@@ -737,5 +932,7 @@ TV.bg = {
   applyScene,
   setWorldTime(wt) { try { skyRenderer.setState(wt); } catch (_) {} },
   moodWeights() { return mood.weights(performance.now()); },
+  setPlace(pl) { place.set(pl); },
+  contrastReport() { return place.report(); },
 };
 })();

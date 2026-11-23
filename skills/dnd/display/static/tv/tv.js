@@ -109,6 +109,15 @@
     }
     if (p.stats && p.stats.world_time && TV.bg) TV.bg.setWorldTime(p.stats.world_time);
     if (p.rewind && p.rewind.stats && p.rewind.stats.world_time && TV.bg) TV.bg.setWorldTime(p.rewind.stats.world_time);
+    // The place picture (scene backgrounds): stats are full snapshots, so one
+    // with no place (a new campaign) clears it.
+    if (TV.bg && TV.bg.setPlace) {
+      const setPlace = (pl) => { try { TV.bg.setPlace(pl); } catch (err) { console.error('tv: place failed', err); } };
+      if ('place' in p) setPlace(p.place);
+      if (p.stats && typeof p.stats === 'object') setPlace(p.stats.place);
+      if (p.rewind && p.rewind.stats && typeof p.rewind.stats === 'object') setPlace(p.rewind.stats.place);
+      if (p.clear) setPlace(null);
+    }
     if (p.scene && sceneLabel && !TV.bg) sceneLabel.textContent = `— ${p.scene.label || p.scene.name || ''} —`;
   }
 
