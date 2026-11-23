@@ -95,6 +95,26 @@ and only build around it if the pictures are good enough.
 - **D16 — The DM's words, tone and pacing don't change.** Naming the location
   in the turn call is the only addition.
 
+**Milestone 0 result (recorded 2026-11-22)**
+
+- **D17 — The trial passed: build everything.** Six pictures were made on the
+  free-tier key with `gemini-2.5-flash-image` (tavern, cave, forest road,
+  flooded crypt, town square, ruined abbey), with no quota error. None showed
+  people, creatures or text. They were shown on `/tv` behind sample narration
+  at 1920×1080 and 3840×2160, with body-text contrast between 8.5:1 and 14.4:1
+  measured on screenshot pixels. Two came back with black letterbox bars, so
+  the request now asks for a full frame. The user's decision was yes, so D4's
+  generation, D6 and D7 are built. The user also decided:
+  - **Style presets (D6):** one preset for now, "Painterly, muted":
+    *painterly fantasy illustration, muted colours, soft atmospheric light,
+    dark edges* (the trial's style).
+  - **Generation default:** on whenever a Gemini key exists; it can be turned
+    off per campaign on the laptop page.
+  - **While a new place's picture is being made (refines D5):** the previous
+    place's picture fades out at once, and the new place shows its mood layer
+    alone until its picture is ready, then the picture fades in. A place that
+    already has a picture shows it at once.
+
 ## Acceptance criteria
 
 **Milestone 0**
@@ -134,4 +154,5 @@ the TV just shows the mood layer, and only the laptop mentions it.
 
 ## Open questions
 
-- The art-style presets are chosen after the milestone 0 trial (user, then).
+- ~~The art-style presets are chosen after the milestone 0 trial (user, then).~~
+  Answered in D17.
