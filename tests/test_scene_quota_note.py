@@ -490,8 +490,12 @@ class TestQuotaWindowMaths(unittest.TestCase):
     Gemini's reset (midnight Pacific), not local midnight."""
 
     def setUp(self):
-        import importlib
-        self.si = importlib.reload(importlib.import_module("scene_images"))
+        import copy, importlib
+        self.si = importlib.import_module("scene_images")
+        # Leave the shared module's quota state as we found it (review N1).
+        saved = copy.deepcopy(self.si._state)
+        self.addCleanup(lambda: (self.si._state.clear(), self.si._state.update(saved)))
+        self.si._state.update({"quota_until": 0.0, "daily": False, "error": "", "error_until": 0.0})
 
     def _exc(self, quota_id, retry):
         import scene_gen

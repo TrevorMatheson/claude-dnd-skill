@@ -177,15 +177,6 @@ def read_manifest(camp_dir) -> dict:
         return {}
 
 
-def is_generated(camp_dir, place_slug: str, path) -> bool:
-    """True when `path` is a picture we made for this place and nobody has
-    changed it since (its hash is the one recorded)."""
-    entry = read_manifest(camp_dir).get(place_slug)
-    if not isinstance(entry, dict) or not entry.get("sha256"):
-        return False
-    return entry["sha256"] == _sha256(path)
-
-
 def save_generated(camp_dir, place_slug: str, data: bytes, style: str) -> Path:
     """Write a made picture to scenes/<slug>.png (temp file, then replace) and
     record it in the manifest. Creates scenes/ if needed."""
