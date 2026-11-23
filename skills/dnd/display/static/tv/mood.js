@@ -7,7 +7,7 @@
 //   shafts     pale beams of light falling from above            (soft)
 //   flicker    a warm glow that wavers like firelight            (soft)
 //   glowmotes  slow, softly pulsing motes of light               (particle)
-// Soft layers are drawn on a half-resolution canvas; particles stay sharp.
+// Soft layers are drawn on a low-resolution canvas; particles stay sharp.
 //
 // Pure and DOM-free so node can test it: MOODS, recipeFor(scene),
 // makeMixer(fadeMs) for the crossfade, budget(recipe, w, h) and PARTICLE_CAP.

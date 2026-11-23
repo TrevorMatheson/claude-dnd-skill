@@ -2,7 +2,7 @@
 // D10, AC2): the scene's gradient, the sky, and the mood layer — 2-4
 // animated layers per scene type from mood.js, crossfading when the scene
 // changes. Soft layers (fog banks, light shafts, flicker) are drawn on a
-// half-resolution canvas; particles are drawn sharp on #particles.
+// low-resolution canvas; particles are drawn sharp on #particles.
 // Exposes TV.bg.applyScene(scene) and TV.bg.setWorldTime(wt).
 (function () {
 'use strict';
@@ -72,7 +72,7 @@ function applyScene(scene) {
 
 const canvas  = document.getElementById('particles');
 const ctx     = canvas.getContext('2d');
-// The soft layers' canvas sits just under #particles, at half resolution.
+// The soft layers' canvas sits just under #particles, at low resolution.
 const softCanvas = document.createElement('canvas');
 softCanvas.id = 'mood-soft';
 softCanvas.setAttribute('aria-hidden', 'true');
@@ -92,12 +92,15 @@ function resizeCanvas() {
   canvas.style.height = H + 'px';
   // setTransform, not scale: scale would build up on every resize.
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const half = dpr / 2;
-  softCanvas.width  = Math.max(1, Math.round(W * half));
-  softCanvas.height = Math.max(1, Math.round(H * half));
+  // Fog, shafts and flicker are blurry by nature: draw them at a quarter of
+  // the screen's resolution (at most 960 px wide), so a 4K TV doesn't fill
+  // millions of gradient pixels every frame for no visible gain.
+  const soft = Math.min(dpr / 4, 960 / Math.max(1, W));
+  softCanvas.width  = Math.max(1, Math.round(W * soft));
+  softCanvas.height = Math.max(1, Math.round(H * soft));
   softCanvas.style.width  = W + 'px';
   softCanvas.style.height = H + 'px';
-  sctx.setTransform(half, 0, 0, half, 0, 0);
+  sctx.setTransform(soft, 0, 0, soft, 0, 0);
   if (moodReady) mood.rebudget();
 }
 window.addEventListener('resize', resizeCanvas);
@@ -750,11 +753,17 @@ const place = (() => {
   imgs.a.alt = imgs.b.alt = '';
   imgs.a.decoding = imgs.b.decoding = 'async';
   const tint = mk('div', 'place-tint'); tint.id = 'place-tint';
+  // The soft copy behind the narration column: the picture, darkened, washed
+  // and blurred, drawn once per picture / layout change at low resolution.
+  // (A live backdrop-filter re-blurs every animation frame; this doesn't.)
+  const blur = mk('canvas', 'place-blur'); blur.id = 'place-blur';
   const scrim = mk('div', 'place-scrim'); scrim.id = 'place-scrim';
   host.insertBefore(imgs.a, before);
   host.insertBefore(imgs.b, before);
   host.insertBefore(tint, before);
+  host.insertBefore(blur, before);
   host.insertBefore(scrim, before);
+  let blurUrl = null;
   document.documentElement.style.setProperty('--place-bright', String(PLACE_BRIGHT));
 
   const model = PLACE ? PLACE.makePlaceModel() : null;
@@ -790,6 +799,9 @@ const place = (() => {
     front = back;
     shownUrl = url;
     host.classList.add('has-place');
+    // The column's soft copy fades in with the new picture.
+    blur.classList.remove('on');
+    blurUrl = null;
     schedule();
   }
   function clear() {
@@ -797,6 +809,8 @@ const place = (() => {
     imgs.b.classList.remove('on');
     shownUrl = null;
     host.classList.remove('has-place');
+    blur.classList.remove('on');
+    blurUrl = null;
     lums = null;
     report = { image: null, scrim: 0, ratio: null, p95: null };
     applyMask(null);
@@ -879,6 +893,38 @@ const place = (() => {
     const after = PLACE.toLinear(PLACE.toSrgb(p95) * (1 - a));
     report = { image: shownUrl, scrim: +a.toFixed(3), ratio: +PLACE.contrastRatio(INK_LUM, after).toFixed(2), p95: +p95.toFixed(4) };
     placeScrim(col, a);
+    drawBlur(img, reg && reg.clip);
+  }
+
+  const BLUR_W = 480;   // CSS-scaled up to the screen, so it is soft by itself
+  function drawBlur(img, clip) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const bw = BLUR_W, bh = Math.max(1, Math.round(vh * BLUR_W / vw));
+    if (blur.width !== bw || blur.height !== bh) { blur.width = bw; blur.height = bh; }
+    const g = blur.getContext('2d');
+    const r = PLACE.coverRect(img.naturalWidth, img.naturalHeight, bw, bh);
+    g.clearRect(0, 0, bw, bh);
+    g.filter = `blur(2px) brightness(${PLACE_BRIGHT})`;
+    g.drawImage(img, r.x, r.y, r.w, r.h);
+    g.filter = 'none';
+    const [top, bot] = activeScene.colors;
+    const grad = g.createRadialGradient(bw / 2, bh * 0.3, 0, bw / 2, bh * 0.3, Math.max(bw, bh));
+    grad.addColorStop(0, top); grad.addColorStop(1, bot);
+    g.globalAlpha = TINT_ALPHA; g.fillStyle = grad; g.fillRect(0, 0, bw, bh); g.globalAlpha = 1;
+    // Only behind the column (the scrim's box), and never outside the
+    // picture's own clip in combat.
+    const sl = parseFloat(scrim.style.left) || 0, sw = parseFloat(scrim.style.width) || 0;
+    let x0 = sl, x1 = sl + sw, y0 = 0, y1 = vh;
+    if (clip) { x0 = Math.max(x0, clip.x); x1 = Math.min(x1, clip.x + clip.w); y0 = clip.y; y1 = clip.y + clip.h; }
+    blur.style.clipPath = `inset(${Math.max(0, y0)}px ${Math.max(0, vw - x1)}px ${Math.max(0, vh - y1)}px ${Math.max(0, x0)}px)`;
+    // Feather the sides like the scrim, so the soft copy melts into the picture.
+    const f = Math.min((x1 - x0) / 4, parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.5 || 40);
+    const m = `linear-gradient(to right, transparent ${x0}px, #000 ${x0 + f}px, #000 ${x1 - f}px, transparent ${x1}px)`;
+    blur.style.maskImage = m; blur.style.webkitMaskImage = m;
+    if (blurUrl !== shownUrl) {
+      blurUrl = shownUrl;
+      requestAnimationFrame(() => { if (blurUrl === shownUrl && shownUrl) blur.classList.add('on'); });
+    }
   }
 
   let extraDim = 0;
