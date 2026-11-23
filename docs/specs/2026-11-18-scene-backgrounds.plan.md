@@ -424,6 +424,9 @@ All foundation steps this needs (`/tv`, the background layer, `/layout`, `displa
 
 ## Needs a spec decision
 
+**Answered by the user on 2026-11-22 (spec D17):** 1 → the new place shows its mood alone while its picture is made (the TV clears on a pending place with no picture; S9 changes `makePlaceModel` and its test accordingly). 2 → kept as planned (`--ink`; QA notes older `--ink-dim` blocks read lower on very bright pictures). 3 → generation is on by default whenever a key exists; with generation on, the first picture creates `scenes/`. S8's preset list is the single "Painterly, muted" style from the trial.
+
+
 All three are buildable either way. Each is one setting or constant in the plan. The plan builds the default shown; the user can change any of them (raised with the user alongside the AC1 trial decision; items 1 and 3 matter only if the trial answer is yes).
 
 1. **Arriving somewhere whose picture is being made.**
