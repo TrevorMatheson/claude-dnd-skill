@@ -1491,6 +1491,15 @@ def _display_status() -> dict:
     # window is cleared), it goes.
     if _voice_note["text"] and now < _voice_note["until"] and now < _tts_quota_until:
         status["voice_note"] = _voice_note["text"]
+    # Why places show only the mood layer (scene backgrounds D7): off, no
+    # key, the image quota used up, or a picture that couldn't be made.
+    try:
+        scenes = (_display_config() or {}).get("scenes") or {}
+        note = scene_images.status(bool(scenes.get("generate", True)), _scene_key())
+    except Exception:
+        note = ""
+    if note:
+        status["scene_note"] = note
     return status
 
 
