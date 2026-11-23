@@ -90,8 +90,23 @@
       <tbody></tbody>
     </table>
   </section>
+
+  <section id="lp-scenes" class="lp-section" aria-labelledby="lp-scenes-h">
+    <h2 id="lp-scenes-h">Scene pictures</h2>
+    <p id="lp-scene-note" class="lp-voice-note" role="status" aria-live="polite" hidden></p>
+    <div class="lp-row">
+      <label for="lp-scene-generate">Make a picture of each new place</label>
+      <div class="lp-ctl"><input id="lp-scene-generate" type="checkbox"> <span class="lp-note">Uses your Gemini key: one image request per new place, made once and kept.</span></div>
+    </div>
+    <div class="lp-row">
+      <label for="lp-scene-style">Art style</label>
+      <div class="lp-ctl"><select id="lp-scene-style"></select></div>
+    </div>
+    <p class="lp-note">Pictures are kept in the campaign's <code>scenes/</code> folder. To use your own, drop an image there named after the place (for example <code>The Flooded Crypt.jpg</code>); yours always wins.</p>
+  </section>
 </main>
 <script src="/static/layout/layout.js"></script>
 <script src="/static/layout/voices.js"></script>
+<script src="/static/layout/scenes.js"></script>
 </body>
 </html>

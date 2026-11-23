@@ -1526,6 +1526,8 @@ def display_config_get():
         modules=list(display_config.MODULES),
         mode_override=_mode_override,
         status=_display_status(),
+        scene_styles=[{"id": k, "label": v["label"], "prompt": v["prompt"]}
+                      for k, v in display_config.SCENE_STYLES.items()],
     )
 
 
@@ -1544,6 +1546,8 @@ def display_config_post():
         merged["layout"] = data["layout"]
     if isinstance(data.get("voice"), dict):
         merged["voice"] = {**(merged.get("voice") or {}), **data["voice"]}
+    if isinstance(data.get("scenes"), dict):
+        merged["scenes"] = {**(merged.get("scenes") or {}), **data["scenes"]}
     clean = display_config.validate(merged)
     folder = _campaign_dir()
     if folder:

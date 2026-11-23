@@ -1,11 +1,13 @@
-"""Per-campaign display settings: the TV layout and the voice settings.
+"""Per-campaign display settings: the TV layout, the voice settings and the
+scene pictures.
 
 Stored as <campaign>/display.json (display foundation spec D6, D7, D17):
 
     {"version": 1,
      "layout": {"preset": "story", "left": ["party"], "right": ["quests", "clock"]},
      "voice":  {"npc_engine": "kokoro", "volume": 1.0, "speed": 1.0,
-                "read_player_actions": false}}
+                "read_player_actions": false},
+     "scenes": {"generate": true, "style": "painterly"}}
 
 A campaign without the file gets the Story preset. The file is written only
 when the host changes something, so older campaigns stay untouched.
@@ -31,6 +33,16 @@ PRESETS = {
 NPC_ENGINES = ("kokoro", "gemini")
 _VOICE_DEFAULTS = {"npc_engine": "kokoro", "volume": 1.0, "speed": 1.0,
                    "read_player_actions": False}
+# Scene pictures (scene backgrounds spec D4, D6, D17): whether new places get
+# a generated picture (on by default; it needs a Gemini key too), and the one
+# art style added to every request so a campaign's pictures belong together.
+SCENE_STYLES = {
+    "painterly": {
+        "label": "Painterly, muted",
+        "prompt": "painterly fantasy illustration, muted colours, soft atmospheric light, dark edges",
+    },
+}
+_SCENE_DEFAULTS = {"generate": True, "style": "painterly"}
 _VOLUME_RANGE = (0.0, 1.0)
 _SPEED_RANGE = (0.5, 2.0)
 
@@ -41,6 +53,7 @@ def default() -> dict:
         "version": VERSION,
         "layout": {"preset": "story", **copy.deepcopy(PRESETS["story"])},
         "voice": dict(_VOICE_DEFAULTS),
+        "scenes": dict(_SCENE_DEFAULTS),
     }
 
 
@@ -92,6 +105,13 @@ def validate(cfg) -> dict:
         v["read_player_actions"] = voice["read_player_actions"]
     if isinstance(voice.get("narrator"), str) and voice["narrator"].strip():
         v["narrator"] = voice["narrator"].strip()
+
+    scenes = cfg.get("scenes") if isinstance(cfg.get("scenes"), dict) else {}
+    sc = base["scenes"]
+    if isinstance(scenes.get("generate"), bool):
+        sc["generate"] = scenes["generate"]
+    if isinstance(scenes.get("style"), str) and scenes["style"] in SCENE_STYLES:
+        sc["style"] = scenes["style"]
     return base
 
 
