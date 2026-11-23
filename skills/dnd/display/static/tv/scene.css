@@ -35,3 +35,9 @@
 /* The picture carries its own sky, so the drawn sky steps aside. */
 #sky { transition: opacity 2.5s ease; }
 #tv-bg.has-place #sky { opacity: 0; }
+.place-img, .place-tint { transition: opacity 2.5s ease, clip-path .8s ease; }
+
+/* ── Combat (D9, AC7): the map's area is plain so the map reads clearly;
+   the picture shows only behind the narration column (bg.js clips it). */
+:root { --scene-plain: #0d0a08; }
+.stage[data-mode="combat-map"] .mapbox { background: var(--scene-plain); }

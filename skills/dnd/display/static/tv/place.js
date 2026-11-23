@@ -88,7 +88,33 @@
     return { set, loaded, failed };
   }
 
-  const api = { coverRect, relLum, contrastRatio, percentile, scrimFor, makePlaceModel, toLinear, toSrgb };
+  // Where the picture may show in each layout (D9, AC7). rects are measured
+  // boxes {x, y, w, h} keyed party, feed, inputbar, map; a zero-size box is a
+  // hidden element and is left out. In combat the picture shows only behind
+  // the narration column (clip), further dimmed; the map's area is plain.
+  const COMBAT_EXTRA_DIM = 0.15;
+  function box(r) {
+    return r && r.w > 0 && r.h > 0 ? r : null;
+  }
+  function unionOf(list) {
+    const rs = list.map(box).filter(Boolean);
+    if (!rs.length) return null;
+    const x0 = Math.min(...rs.map(r => r.x)), y0 = Math.min(...rs.map(r => r.y));
+    const x1 = Math.max(...rs.map(r => r.x + r.w)), y1 = Math.max(...rs.map(r => r.y + r.h));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function regions(mode, rects) {
+    const r = rects || {};
+    if (mode === 'combat-map') {
+      return { clip: unionOf([r.party, r.feed, r.inputbar]), plain: box(r.map), extraDim: COMBAT_EXTRA_DIM };
+    }
+    if (mode === 'combat-nomap') {
+      return { clip: unionOf([r.feed, r.inputbar]), plain: null, extraDim: COMBAT_EXTRA_DIM };
+    }
+    return { clip: null, plain: null, extraDim: 0 };
+  }
+
+  const api = { regions, unionOf, coverRect, relLum, contrastRatio, percentile, scrimFor, makePlaceModel, toLinear, toSrgb };
   root.TV = root.TV || {};
   root.TV.place = api;
   if (typeof module !== 'undefined') module.exports = api;

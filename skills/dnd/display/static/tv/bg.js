@@ -828,13 +828,30 @@ const place = (() => {
     const x1 = Math.max(...rs.map(r => r.x + r.w)), y1 = Math.max(...rs.map(r => r.y + r.h));
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
-  function column() {
-    return union([rectOf('tv-feed'), rectOf('tv-inputbar')]);
+  // The layout's regions (D9): in combat the picture shows only behind the
+  // narration column, further dimmed; elsewhere it fills the screen.
+  function regions() {
+    const mode = (stage && stage.dataset.mode) || 'story';
+    return PLACE.regions(mode, { party: rectOf('tv-party'), feed: rectOf('tv-feed'),
+                                 inputbar: rectOf('tv-inputbar'), map: rectOf('tv-map') });
+  }
+  function column(reg) {
+    return (reg && reg.clip) || union([rectOf('tv-feed'), rectOf('tv-inputbar')]);
+  }
+  function applyClip(reg) {
+    const c = reg && reg.clip;
+    const inset = c
+      ? `inset(${Math.max(0, c.y)}px ${Math.max(0, window.innerWidth - c.x - c.w)}px ${Math.max(0, window.innerHeight - c.y - c.h)}px ${Math.max(0, c.x)}px)`
+      : '';
+    for (const el of [imgs.a, imgs.b, tint]) el.style.clipPath = inset;
   }
 
   function measure() {
     const img = imgs[front];
-    const col = column();
+    const reg = PLACE ? regions() : null;
+    applyClip(reg);
+    const col = column(reg);
+    extraDim = reg ? reg.extraDim : 0;
     if (!shownUrl || !img.naturalWidth || !col) { placeScrim(col, SCRIM_MIN); return; }
     const vw = window.innerWidth, vh = window.innerHeight;
     const k = SAMPLE_W / vw;
@@ -864,7 +881,8 @@ const place = (() => {
     placeScrim(col, a);
   }
 
-  function currentExtraDim() { return 0; }
+  let extraDim = 0;
+  function currentExtraDim() { return extraDim; }
 
   function placeScrim(col, alpha) {
     const pad = parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.5 || 40;
