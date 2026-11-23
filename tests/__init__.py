@@ -32,6 +32,9 @@ if not os.environ.get("DND_TEST_SANDBOX"):
     # Nothing listens on the discard port: a script that would post to the
     # live TV on :5001 gets "connection refused" instead.
     os.environ["DND_DISPLAY_URL"] = "http://127.0.0.1:9"
+    # No test may ever see the user's real Gemini key (image or voice quota).
+    for _k in ("GEMINI_API_KEY", "DND_TTS_KEY", "GOOGLE_API_KEY"):
+        os.environ.pop(_k, None)
     os.environ["HOME"] = str(_home)
     os.environ["USERPROFILE"] = str(_home)
     atexit.register(shutil.rmtree, str(_sandbox), ignore_errors=True)

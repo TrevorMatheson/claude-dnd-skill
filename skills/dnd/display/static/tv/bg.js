@@ -756,12 +756,16 @@ const place = (() => {
   // The soft copy behind the narration column: the picture, darkened, washed
   // and blurred, drawn once per picture / layout change at low resolution.
   // (A live backdrop-filter re-blurs every animation frame; this doesn't.)
-  const blur = mk('canvas', 'place-blur'); blur.id = 'place-blur';
+  // Two of them, so a change of place crossfades behind the text as well.
+  const blurs = { a: mk('canvas', 'place-blur'), b: mk('canvas', 'place-blur') };
+  blurs.a.id = 'place-blur-a'; blurs.b.id = 'place-blur-b';
+  let blurFront = 'a';
   const scrim = mk('div', 'place-scrim'); scrim.id = 'place-scrim';
   host.insertBefore(imgs.a, before);
   host.insertBefore(imgs.b, before);
   host.insertBefore(tint, before);
-  host.insertBefore(blur, before);
+  host.insertBefore(blurs.a, before);
+  host.insertBefore(blurs.b, before);
   host.insertBefore(scrim, before);
   let blurUrl = null;
   document.documentElement.style.setProperty('--place-bright', String(PLACE_BRIGHT));
@@ -799,9 +803,7 @@ const place = (() => {
     front = back;
     shownUrl = url;
     host.classList.add('has-place');
-    // The column's soft copy fades in with the new picture.
-    blur.classList.remove('on');
-    blurUrl = null;
+    // The column's soft copy follows on the next measurement (crossfading).
     schedule();
   }
   function clear() {
@@ -809,7 +811,8 @@ const place = (() => {
     imgs.b.classList.remove('on');
     shownUrl = null;
     host.classList.remove('has-place');
-    blur.classList.remove('on');
+    blurs.a.classList.remove('on');
+    blurs.b.classList.remove('on');
     blurUrl = null;
     lums = null;
     report = { image: null, scrim: 0, ratio: null, p95: null };
@@ -835,13 +838,7 @@ const place = (() => {
     const r = el.getBoundingClientRect();
     return (r.width > 0 && r.height > 0) ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
   }
-  function union(rs) {
-    rs = rs.filter(Boolean);
-    if (!rs.length) return null;
-    const x0 = Math.min(...rs.map(r => r.x)), y0 = Math.min(...rs.map(r => r.y));
-    const x1 = Math.max(...rs.map(r => r.x + r.w)), y1 = Math.max(...rs.map(r => r.y + r.h));
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  }
+  const union = (rs) => PLACE.unionOf(rs);
   // The layout's regions (D9): in combat the picture shows only behind the
   // narration column, further dimmed; elsewhere it fills the screen.
   function regions() {
@@ -899,6 +896,11 @@ const place = (() => {
   const BLUR_W = 480;   // CSS-scaled up to the screen, so it is soft by itself
   function drawBlur(img, clip) {
     const vw = window.innerWidth, vh = window.innerHeight;
+    // A new picture is drawn on the hidden copy, which then fades in over
+    // the old one; a layout change just redraws the copy that is up.
+    const fresh = blurUrl !== shownUrl;
+    if (fresh) blurFront = blurFront === 'a' ? 'b' : 'a';
+    const blur = blurs[blurFront], other = blurs[blurFront === 'a' ? 'b' : 'a'];
     const bw = BLUR_W, bh = Math.max(1, Math.round(vh * BLUR_W / vw));
     if (blur.width !== bw || blur.height !== bh) { blur.width = bw; blur.height = bh; }
     const g = blur.getContext('2d');
@@ -920,10 +922,17 @@ const place = (() => {
     // Feather the sides like the scrim, so the soft copy melts into the picture.
     const f = Math.min((x1 - x0) / 4, parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.5 || 40);
     const m = `linear-gradient(to right, transparent ${x0}px, #000 ${x0 + f}px, #000 ${x1 - f}px, transparent ${x1}px)`;
-    blur.style.maskImage = m; blur.style.webkitMaskImage = m;
-    if (blurUrl !== shownUrl) {
+    for (const el of [blur, other]) {
+      el.style.clipPath = blur.style.clipPath;
+      el.style.maskImage = m; el.style.webkitMaskImage = m;
+    }
+    if (fresh) {
       blurUrl = shownUrl;
-      requestAnimationFrame(() => { if (blurUrl === shownUrl && shownUrl) blur.classList.add('on'); });
+      requestAnimationFrame(() => {
+        if (blurUrl !== shownUrl || !shownUrl) return;
+        blur.classList.add('on');
+        other.classList.remove('on');
+      });
     }
   }
 

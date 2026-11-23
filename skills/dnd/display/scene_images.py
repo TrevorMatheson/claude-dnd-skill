@@ -86,6 +86,8 @@ def find_image(camp_dir, place_slug: str) -> Optional[tuple]:
         folder = scenes_dir(camp_dir)
         if not folder.is_dir():
             return None
+        entry = read_manifest(camp_dir).get(place_slug)
+        made_hash = entry.get("sha256") if isinstance(entry, dict) else None
         best = None
         for p in folder.iterdir():
             ext = p.suffix.lower()
@@ -93,14 +95,17 @@ def find_image(camp_dir, place_slug: str) -> Optional[tuple]:
                 continue
             if slug(p.stem) != place_slug:
                 continue
-            rank = (IMAGE_EXTS.index(ext), p.stem != place_slug, p.name)
+            made = bool(made_hash) and _sha256(p) == made_hash
+            # The user's own picture always wins over one we made (D5), then
+            # png, jpg, jpeg, webp; an exact slug name before a lenient one.
+            rank = (made, IMAGE_EXTS.index(ext), p.stem != place_slug, p.name)
             if best is None or rank < best[0]:
                 best = (rank, p)
     except OSError:
         return None
     if not best:
         return None
-    return best[1], ("generated" if is_generated(camp_dir, place_slug, best[1]) else "user")
+    return best[1], ("generated" if best[0][0] else "user")
 
 
 def image_url(path) -> str:
@@ -208,8 +213,11 @@ _state_lock = threading.Lock()
 
 
 def _end_of_day(now: float) -> float:
-    lt = time.localtime(now)
-    return now + 86400 - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec)
+    """When Gemini's daily quota comes back: midnight Pacific time, taken
+    as 08:00 UTC (an hour late in summer, never early), not local midnight."""
+    day = 86400
+    reset = (now // day) * day + 8 * 3600
+    return reset if reset > now else reset + day
 
 
 def quota_out(now: Optional[float] = None) -> bool:
@@ -248,9 +256,13 @@ def status(generate_on: bool, has_key: bool, now: Optional[float] = None) -> str
         return ("No Gemini key — places show the mood layer only. Add the voice's "
                 "Gemini key to have pictures made.")
     with _state_lock:
-        if now < _state["quota_until"] and _state["daily"]:
-            hours = max(1, round((_state["quota_until"] - now) / 3600))
-            return f"Gemini's image quota is used up — back in about {hours} h"
+        if now < _state["quota_until"]:
+            left = _state["quota_until"] - now
+            when = (f"{max(1, round(left / 3600))} h" if left >= 3600
+                    else f"{max(1, round(left / 60))} min")
+            if _state["daily"]:
+                return f"Gemini's image quota is used up — back in about {when}"
+            return f"Gemini is limiting image requests — pictures resume in about {when}"
         if _state["error"] and now < _state["error_until"]:
             return _state["error"]
     return ""

@@ -67,7 +67,7 @@ MINUTE_ID = "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
 
 NOTE_OFF = "Scene pictures are off — places show the mood layer only."
 NOTE_NO_KEY_PREFIX = "No Gemini key — "
-NOTE_QUOTA_RE = re.compile(r"^Gemini's image quota is used up — back in about (\d+) h$")
+NOTE_QUOTA_RE = re.compile(r"^Gemini's image quota is used up — back in about (\d+) (?:h|min)$")  # minutes under an hour (review nit)
 NOTE_ERROR_PREFIX = "Couldn't make the picture for "
 # Any of these in a TV broadcast or in the phones' stats is a leak (D7).
 NOTE_MARKERS = ("Scene pictures are off", "No Gemini key", "image quota",
@@ -483,3 +483,38 @@ class TestLayoutRendersNote(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQuotaWindowMaths(unittest.TestCase):
+    """Review S1, S2: every 429 leaves a laptop note; the daily window ends at
+    Gemini's reset (midnight Pacific), not local midnight."""
+
+    def setUp(self):
+        import importlib
+        self.si = importlib.reload(importlib.import_module("scene_images"))
+
+    def _exc(self, quota_id, retry):
+        import scene_gen
+        return scene_gen.SceneGenError("Google answered 429", status=429,
+                                       quota_id=quota_id, retry_after=retry)
+
+    def test_per_minute_429_has_a_note(self):
+        now = 1_800_000_000.0
+        self.si.record_failure("The Crypt", self._exc("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", 40), now)
+        note = self.si.status(True, True, now + 1)
+        self.assertIn("limiting image requests", note)
+        self.assertIn("min", note)
+        self.assertEqual(self.si.status(True, True, now + 60), "")
+
+    def test_daily_without_retry_ends_at_0800_utc(self):
+        now = 1_800_000_000.0                       # 2027-01-15 08:00 UTC is a boundary check below
+        self.si.record_failure("The Crypt", self._exc("GenerateRequestsPerDayPerProjectPerModel-FreeTier", 0), now)
+        until = self.si._state["quota_until"]
+        self.assertGreater(until, now)
+        self.assertLessEqual(until - now, 86400)
+        self.assertEqual(int(until) % 86400, 8 * 3600)
+
+    def test_short_daily_window_says_minutes(self):
+        now = 1_800_000_000.0
+        self.si.record_failure("The Crypt", self._exc("GenerateRequestsPerDayPerProjectPerModel-FreeTier", 600), now)
+        self.assertIn("10 min", self.si.status(True, True, now))

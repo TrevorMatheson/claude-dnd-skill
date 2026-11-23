@@ -511,3 +511,35 @@ class TestGenerationOff(_GenCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ─── Review follow-ups ───────────────────────────────────────────────────────
+
+class TestUsersFileBeatsGenerated(_GenCase):
+    """D5 / review B1: a picture the user drops in after we made one wins,
+    whatever its extension, and renew never touches it."""
+
+    def test_user_jpg_beats_generated_png(self):
+        self._generate_once()
+        self._settle()
+        self._scene_file("The Flooded Crypt.jpg", JPEG)
+        import scene_images
+        path, source = scene_images.find_image(self.camp, SLUG)
+        self.assertEqual(pathlib.Path(path).name, "The Flooded Crypt.jpg")
+        self.assertEqual(source, "user")
+        self._arrive(renew=True)
+        self._settle()
+        self.assertEqual(len(self.stub.calls), 1, "renew remade a picture while the user's own was there")
+        self.assertIn("The%20Flooded%20Crypt.jpg", self._last_place()["image"])
+
+
+class TestNoCampaignFolder(_GenCase):
+    """Review S5: a place in a campaign folder that isn't there makes nothing."""
+
+    def test_missing_campaign_makes_no_request(self):
+        self._post({"campaign": "no-such-campaign-xyz"})
+        self._arrive()
+        self._settle()
+        self.assertEqual(self.stub.calls, [])
+        root = pathlib.Path(os.environ["DND_CAMPAIGN_ROOT"]) / "campaigns" / "no-such-campaign-xyz"
+        self.assertFalse(root.exists(), "a folder was made for a campaign that doesn't exist")

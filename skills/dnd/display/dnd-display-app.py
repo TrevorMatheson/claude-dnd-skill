@@ -1640,10 +1640,14 @@ def _resolve_place(raw, campaign: Optional[str]):
             scenes = display_config.load(camp_dir).get("scenes") or {}
         except Exception:
             scenes = {}
-        style = display_config.SCENE_STYLES.get(scenes.get("style")) or             next(iter(display_config.SCENE_STYLES.values()))
-        if scenes.get("generate", True) and _scene_key() and not scene_images.quota_out():
+        style = (display_config.SCENE_STYLES.get(scenes.get("style"))
+                 or next(iter(display_config.SCENE_STYLES.values())))
+        # Never for a campaign folder that isn't there (a mistyped name).
+        if (camp_dir.is_dir() and scenes.get("generate", True) and _scene_key()
+                and not scene_images.quota_out()):
             job = (camp_dir, s, clean["name"], clean["look"], style["prompt"])
-    place = {"name": clean["name"], "slug": s, "image": image, "pending": job is not None}
+    place = {"name": clean["name"], "slug": s, "image": image, "pending": job is not None,
+             "_camp": str(camp_dir) if camp_dir is not None else None}
     return True, place, job
 
 
@@ -1669,9 +1673,10 @@ def _scene_ready(camp_dir, slug: str, url: Optional[str]) -> None:
         if url:
             place["image"] = url
         place["pending"] = False
-        snap = dict(place)
+        # Broadcast under the lock, so a /stats for the next place can't go
+        # out first and be overtaken by this one (the wrong picture).
+        _broadcast({"place": dict(place)})
     _persist_stats()
-    _broadcast({"place": snap})
 
 
 @app.route("/icons/<path:filename>")
@@ -1973,6 +1978,7 @@ def stats():
         _place_campaign = (str(data["campaign"]).strip() if data.get("campaign")
                            else _active_campaign_name())
         _place_ok, _place, _place_job = _resolve_place(data["place"], _place_campaign)
+        _place_dir = _place.pop("_camp", None) if isinstance(_place, dict) else None
     _old_campaign = _active_campaign_name() if "campaign" in data else None
 
     _effect_expire_events: list[dict] = []
@@ -1980,8 +1986,7 @@ def stats():
         if _place_ok:
             global _place_camp
             _current_stats["place"] = _place
-            _place_camp = str(_place_job[0]) if _place_job else (
-                str(_find_campaign(_place_campaign)) if _place and _place_campaign else None)
+            _place_camp = _place_dir if _place else None
             if _place_job:
                 _scene_submit(_place_job)
 
