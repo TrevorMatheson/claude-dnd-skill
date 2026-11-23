@@ -1,0 +1,3 @@
+# Keep these bytes exactly as written: crlf.md must stay CRLF, gbk.md must
+# stay GBK, the rest LF. No end-of-line conversion on checkout.
+* -text

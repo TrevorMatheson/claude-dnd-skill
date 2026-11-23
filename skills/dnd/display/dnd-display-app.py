@@ -3334,6 +3334,23 @@ def get_character_sheet(character):
     return f"No sheet found for '{safe}' in campaign '{camp}'", 404
 
 
+@app.route("/sheet/<path:name>", methods=["GET"])
+def sheet_get(name):
+    """The character sheet as JSON for /phone (phone sheet spec D5): every
+    section parsed, or kept as plain text when it can't be read."""
+    if not _token_ok():
+        return jsonify({"error": "forbidden"}), 403
+    name = name.strip()
+    if not _CHAR_NAME_RE.match(name) or "/" in name or "\\" in name or ".." in name:
+        return jsonify({"error": "bad character name"}), 400
+    import sheet as _sheet
+    got, info = _sheet.load(_active_campaign_name(), name)
+    if got is None:
+        return jsonify({"error": info}), 404
+    return jsonify({"sheet": got, "editable": _sheet.editable(got) if info else [],
+                    "path_ok": bool(info)})
+
+
 @app.route("/device/approve", methods=["POST"])
 def device_approve():
     """DM approves a pending device. Body: {"id": "<device_id>"}"""
