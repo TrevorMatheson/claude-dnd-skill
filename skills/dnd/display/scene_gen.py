@@ -44,16 +44,19 @@ class SceneGenError(Exception):
 
 
 def build_prompt(look: str, style: str) -> str:
+    """The request text. The campaign's art style is required (D6): every
+    picture of a campaign is asked for in the same style."""
+    if not isinstance(style, str) or not style.strip():
+        raise ValueError("an image request needs the campaign's art style")
     look = (look or "").strip() or "an unnamed place"
-    style = (style or "").strip()
+    style = style.strip()
     parts = [
         f"A wide {ASPECT_RATIO} landscape view of this place, as travellers would "
         f"see it on arriving: {look}.",
         "Show the place itself, empty, as a background painting that fills the "
         "whole frame edge to edge, with no border, frame or black bars.",
     ]
-    if style:
-        parts.append(f"Art style: {style}.")
+    parts.append(f"Art style: {style}.")
     parts.append(RULES)
     return " ".join(parts)
 

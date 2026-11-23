@@ -160,6 +160,68 @@ class TurnLocation(unittest.TestCase):
         self.assertIsNone(send._turn_location({"location": None}))
 
 
+class TurnLocationRenew(unittest.TestCase):
+    """Scene backgrounds S9 (AC4, D5 "Replaceable"): the location may carry
+    `"renew": true` to ask for a new picture of a place that changed. Only a
+    real bool is accepted; it rides in `place` to the server.
+
+    Assumed interface: renew lives inside the location object (the server's
+    scene_images.clean_place reads place["renew"]); `renew: false` may be
+    passed through or dropped."""
+
+    def setUp(self):
+        send._SEND_LOG.clear()
+        self.rec = _Recorder()
+
+    def _send(self, loc):
+        turn = {"blocks": [{"text": "Smoke still hangs over the ruined taproom."}], "location": loc}
+        with mock.patch.object(send, "_post", side_effect=self.rec), \
+                mock.patch.object(send, "_read_token", return_value="t"), \
+                mock.patch.object(send, "dice_request", return_value=0):
+            return send.send_turn(turn)
+
+    def test_renew_true_accepted_and_sent(self):
+        loc = dict(TAVERN, renew=True)
+        self.assertEqual(send._turn_location({"location": loc}),
+                         {"name": TAVERN["name"], "look": TAVERN["look"], "renew": True})
+        self.assertEqual(self._send(dict(loc)), 0)
+        stats = self.rec.stats()
+        self.assertEqual(len(stats), 1)
+        self.assertIs(stats[0]["place"].get("renew"), True, stats[0]["place"])
+        self.assertEqual(stats[0]["place"]["name"], TAVERN["name"])
+
+    def test_renew_false_accepted(self):
+        loc = dict(TAVERN, renew=False)
+        got = send._turn_location({"location": loc})
+        self.assertEqual(got["name"], TAVERN["name"])
+        self.assertIs(got.get("renew", False), False, got)
+        self.assertEqual(self._send(dict(loc)), 0)
+        self.assertIs(self.rec.stats()[0]["place"].get("renew", False), False)
+
+    def test_non_bool_renew_rejected(self):
+        for bad in ("true", "yes", 1, 0, [], {}, 1.0):
+            with self.subTest(renew=bad):
+                with self.assertRaises(ValueError):
+                    send._turn_location({"location": dict(TAVERN, renew=bad)})
+                self.rec.calls.clear()
+                self.assertEqual(self._send(dict(TAVERN, renew=bad)), 2)
+                self.assertEqual(self.rec.calls, [], f"renew={bad!r} must post nothing")
+
+    def test_other_unknown_keys_still_rejected(self):
+        with self.assertRaises(ValueError):
+            send._turn_location({"location": dict(TAVERN, renew=True, image="x.png")})
+
+    # Plan S9: SKILL.md gains one sentence on renew, in Display sync.
+    def test_skill_md_mentions_renew(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        start = text.find("**Display sync")
+        self.assertNotEqual(start, -1, "Display sync section not found in SKILL.md")
+        nxt = re.search(r"^---\s*$", text[start:], re.M)
+        section = text[start:start + nxt.start()] if nxt else text[start:]
+        self.assertTrue(re.search(r"\brenew\b", section),
+                        "SKILL.md Display sync does not document renew")
+
+
 class SkillDocExample(unittest.TestCase):
 
     def _example(self):

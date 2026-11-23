@@ -555,7 +555,8 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #                        "look": "a half-submerged stone hall, pillars in black water"}
 # The name is how the picture is found again on a return (keep it the same);
 # the look is what the party sees, never the people in it. It rides the same
-# /stats post as "place". "location": null clears the place.
+# /stats post as "place". "location": null clears the place. Add
+# "renew": true to have a made picture made again (after a fire, say).
 
 _BLOCK_TYPES = ("narration", "action", "player", "npc", "dice", "tutor")
 
@@ -650,7 +651,7 @@ def _turn_location(turn: dict) -> "dict | None":
         return None
     if not isinstance(loc, dict):
         raise ValueError(f"location must be an object or null, not {type(loc).__name__}")
-    unknown = set(loc) - {"name", "look"}
+    unknown = set(loc) - {"name", "look", "renew"}
     if unknown:
         raise ValueError(f"location has unknown keys: {', '.join(sorted(unknown))}")
     name, look = loc.get("name"), loc.get("look", "")
@@ -666,7 +667,13 @@ def _turn_location(turn: dict) -> "dict | None":
         raise ValueError("location look must be text")
     if len(look) > _LOCATION_LOOK_MAX:
         raise ValueError(f"location look is over {_LOCATION_LOOK_MAX} characters")
-    return {"name": name.strip(), "look": look.strip()}
+    out = {"name": name.strip(), "look": look.strip()}
+    if "renew" in loc:
+        if not isinstance(loc["renew"], bool):
+            raise ValueError("location renew must be true or false")
+        if loc["renew"]:
+            out["renew"] = True
+    return out
 
 
 def _apply_turn_moves(turn: dict) -> "dict | None":

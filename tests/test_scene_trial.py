@@ -228,7 +228,8 @@ class TestBuildRequest(SceneTestBase):
         self.assertIn("16:9", dumped, "the request must ask for the 16:9 aspect ratio")
 
     def test_rules_hold_for_any_look_and_style(self):
-        for look, style in (("", ""), ("a crowded market full of merchants", "anime"),
+        # S9: the style became required, so an empty look is checked with a style.
+        for look, style in (("", "ink wash"), ("a crowded market full of merchants", "anime"),
                             ("x" * 400, "watercolour")):
             prompt = _prompt_text(self.scene_gen.build_request(look, style)).lower()
             for phrase in ("no people", "no creatures", "no text"):

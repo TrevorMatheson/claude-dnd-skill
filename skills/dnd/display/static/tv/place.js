@@ -62,8 +62,9 @@
   //   loaded(url)  the browser finished loading url
   //   failed(url)  it couldn't
   // Each returns {action:'show', url}, {action:'keep'}, {action:'clear'} or
-  // null (nothing to do). A pending place keeps the picture that is up (D5);
-  // a place with no picture clears to the mood layer (D7, AC9).
+  // null (nothing to do). A place with no picture yet clears to its mood
+  // layer, whether it is being made (D17) or not (D7, AC9); a renewal keeps
+  // its old picture's URL until the new one is ready.
   function makePlaceModel() {
     let wanted = null;   // the url we want up (loading or up)
     function set(place) {
@@ -73,7 +74,8 @@
         wanted = url;
         return { action: 'show', url };
       }
-      if (place && place.pending) return { action: 'keep' };
+      // No picture yet (still being made, D17) or none at all (D7): the new
+      // place shows its mood alone; the picture fades in when it arrives.
       wanted = null;
       return { action: 'clear' };
     }

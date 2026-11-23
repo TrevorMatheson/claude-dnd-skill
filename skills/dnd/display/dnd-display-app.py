@@ -1595,25 +1595,74 @@ def scene_image(name):
     return send_from_directory(str(path.parent), path.name, mimetype=mimetype)
 
 
+def _scene_key() -> bool:
+    try:
+        return bool(_tts is not None and _tts._get_api_key())
+    except Exception:
+        return False
+
+
 def _resolve_place(raw, campaign: Optional[str]):
-    """(ok, place) for a /stats "place": ok is False for a shape we ignore;
-    place is None for null, else {name, slug, image, pending}. The look is
-    never kept: stats reach the phones."""
+    """(ok, place, job) for a /stats "place". ok is False for a shape we
+    ignore; place is None for null, else {name, slug, image, pending}; job is
+    the picture to make in the background, or None. The look is never kept:
+    stats reach the phones (it only goes into the image request)."""
     if raw is None:
-        return True, None
+        return True, None, None
     clean = scene_images.clean_place(raw)
     if clean is None:
-        return False, None
+        return False, None, None
     s = scene_images.slug(clean["name"])
-    image = None
+    image, source, job = None, None, None
+    camp_dir = None
     if campaign:
         try:
-            found = scene_images.find_image(_find_campaign(campaign), s)
+            camp_dir = _find_campaign(campaign)
+            found = scene_images.find_image(camp_dir, s)
         except Exception:
             found = None
         if found:
-            image = scene_images.image_url(found[0])
-    return True, {"name": clean["name"], "slug": s, "image": image, "pending": False}
+            image, source = scene_images.image_url(found[0]), found[1]
+    # Make a picture when there is none, or when Claude asks for a new one of
+    # a picture we made (D5). The user's own picture always wins.
+    wanted = image is None or (clean["renew"] and source == "generated")
+    if camp_dir is not None and wanted:
+        try:
+            scenes = display_config.load(camp_dir).get("scenes") or {}
+        except Exception:
+            scenes = {}
+        style = display_config.SCENE_STYLES.get(scenes.get("style")) or             next(iter(display_config.SCENE_STYLES.values()))
+        if scenes.get("generate", True) and _scene_key() and not scene_images.quota_out():
+            job = (camp_dir, s, clean["name"], clean["look"], style["prompt"])
+    place = {"name": clean["name"], "slug": s, "image": image, "pending": job is not None}
+    return True, place, job
+
+
+_scene_worker = None
+_place_camp: Optional[str] = None      # the campaign folder the current place is in
+
+
+def _scene_submit(job) -> None:
+    global _scene_worker
+    if _scene_worker is None:
+        _scene_worker = scene_images.Worker(_scene_ready)
+    _scene_worker.submit(*job)
+
+
+def _scene_ready(camp_dir, slug: str, url: Optional[str]) -> None:
+    """A picture job ended (url is None when it failed). Show it if the party
+    is still there; it is saved for their return either way (D5)."""
+    with _stats_lock:
+        place = _current_stats.get("place")
+        if (not isinstance(place, dict) or place.get("slug") != slug
+                or _place_camp != str(camp_dir)):
+            return
+        if url:
+            place["image"] = url
+        place["pending"] = False
+        snap = dict(place)
+    _persist_stats()
+    _broadcast({"place": snap})
 
 
 @app.route("/icons/<path:filename>")
@@ -1910,17 +1959,22 @@ def stats():
 
     # The place's picture is looked up before taking the stats lock (it reads
     # the campaign's scenes/ folder).
-    _place_ok, _place = False, None
+    _place_ok, _place, _place_job = False, None, None
     if "place" in data:
         _place_campaign = (str(data["campaign"]).strip() if data.get("campaign")
                            else _active_campaign_name())
-        _place_ok, _place = _resolve_place(data["place"], _place_campaign)
+        _place_ok, _place, _place_job = _resolve_place(data["place"], _place_campaign)
     _old_campaign = _active_campaign_name() if "campaign" in data else None
 
     _effect_expire_events: list[dict] = []
     with _stats_lock:
         if _place_ok:
+            global _place_camp
             _current_stats["place"] = _place
+            _place_camp = str(_place_job[0]) if _place_job else (
+                str(_find_campaign(_place_campaign)) if _place and _place_campaign else None)
+            if _place_job:
+                _scene_submit(_place_job)
 
         if "players" in data:
             # replace_players=true wipes the list first — used on campaign load

@@ -3,8 +3,8 @@ backgrounds, plan step S5).
 
 AC6 (dimming and measurement, the pure maths), AC4 (TV side: the place a
 stats snapshot names is the one shown), AC9 (TV side: a place with no image
-clears to the mood layer), D5 (a pending place keeps the current picture),
-D7, D8.
+clears to the mood layer), D5 as refined by D17 (a pending place with no
+picture clears to its mood at once; its picture fades in when ready), D7, D8.
 
 The browser half of S5 (fade-in within 3 s, contrastReport() >= 4.5 on a
 near-white and a dark image, 1080p / 4K screenshots, reload, no console
@@ -39,8 +39,12 @@ Assumed contract, pinned by these tests (plan "Shape", place.js row):
           loaded(A) while A is wanted -> show A      (the caller fades it in)
           set(A), set(B), loaded(A)   -> nothing     (stale load ignored)
           failed(B) while B is wanted -> clear
-          A up, set({image: null, pending: true})  -> keep
-          then set({image: null, pending: false})  -> clear
+          A up, set({image: null, pending: true})  -> clear   (D17: the new
+                                       place's mood shows alone while its
+                                       picture is made)
+          then set({image: B})                     -> show B
+          A up, set({image: A, pending: true})     -> nothing (a renewal:
+                                       the old picture stays until the new)
           set(null) while A is up     -> clear
           set(A) when A is already wanted or up    -> nothing
 
@@ -362,9 +366,11 @@ out({ f, okB: act(m.loaded(B.image)) });
         self.assertIsNone(res["f"])
         self.assertEqual(res["okB"], {"action": "show", "url": "/scene-image/tavern.jpg?v=2"})
 
-    # S5 Done when / D5: a pending place with no image keeps A; once it is no
-    # longer pending, it clears to the mood layer (D7, AC9).
-    def test_pending_keeps_then_clears(self):
+    # D17 (refines D5, plan S9): arriving somewhere whose picture is still
+    # being made fades the previous place's picture out at once; the new place
+    # shows its mood layer alone. Once no longer pending with no picture, it
+    # stays cleared (D7, AC9).
+    def test_pending_without_image_clears(self):
         res = self.run_js("""
 const m = makePlaceModel();
 m.set(A); m.loaded(A.image);
@@ -372,10 +378,36 @@ const k = act(m.set(place('Bridge', null, true)));
 const c = act(m.set(place('Bridge', null, false)));
 out({ k, c });
 """)
-        self.assertEqual(res["k"], {"action": "keep"})
-        self.assertEqual(res["c"], {"action": "clear"})
+        self.assertEqual(res["k"], {"action": "clear"},
+                         "D17: a pending place with no picture clears the old one at once")
+        self.assertIn(res["c"], ({"action": "clear"}, None))
 
-    # A pending place whose image then arrives shows it.
+    # D17: after the pending clear, A's late load must not bring A back.
+    def test_pending_clear_ignores_late_load_of_old_picture(self):
+        res = self.run_js("""
+const m = makePlaceModel();
+m.set(A);
+m.set(place('Bridge', null, true));
+out(act(m.loaded(A.image)));
+""")
+        self.assertIsNone(res, "the old place's picture must not show once the new place is pending")
+
+    # Plan S9 renewing: a pending place that still carries its old picture
+    # (renew) leaves that picture up until the new one is ready.
+    def test_pending_with_current_image_keeps_it(self):
+        res = self.run_js("""
+const m = makePlaceModel();
+m.set(A); m.loaded(A.image);
+const r = act(m.set(place('Crypt', A.image, true)));
+const newer = '/scene-image/crypt.png?v=9';
+out({ r, s: act(m.set(place('Crypt', newer, false))), l: act(m.loaded(newer)) });
+""")
+        self.assertIn(res["r"], (None, {"action": "keep"}))
+        self.assertEqual(res["s"], {"action": "show", "url": "/scene-image/crypt.png?v=9"})
+        self.assertEqual(res["l"], {"action": "show", "url": "/scene-image/crypt.png?v=9"})
+
+    # D17: a pending place whose image then arrives (the worker's {"place"}
+    # event) fades it in.
     def test_pending_then_image_shows(self):
         res = self.run_js("""
 const m = makePlaceModel();
