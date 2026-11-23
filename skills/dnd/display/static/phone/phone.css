@@ -12,6 +12,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+html, body { overflow-x: hidden; max-width: 100%; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -66,7 +67,7 @@ body[data-layout="desktop"] .tabbar { display: none; }
 
 /* ── Desktop layout: side by side ──────────────────────────────────────── */
 body[data-layout="desktop"] .panes {
-  display: grid; grid-template-columns: minmax(320px, 2fr) minmax(360px, 3fr);
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   grid-template-areas: "play sheet" "map map";
   gap: 0; max-width: 1400px; width: 100%; margin: 0 auto; align-items: start;
 }
@@ -74,6 +75,17 @@ body[data-layout="desktop"] #pane-play { grid-area: play; border-right: 1px soli
   position: sticky; top: 57px; max-height: calc(100vh - 57px); overflow-y: auto; }
 body[data-layout="desktop"] #pane-sheet { grid-area: sheet; }
 body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid var(--line); }
+
+/* "Desktop version" chosen on a narrow window: stack the panes rather than
+   squeeze or clip them. */
+@media (max-width: 699px) {
+  body[data-layout="desktop"] .panes { grid-template-columns: minmax(0, 1fr); grid-template-areas: "play" "sheet" "map"; }
+  body[data-layout="desktop"] #pane-play { position: static; max-height: none; border-right: 0;
+    border-bottom: 1px solid var(--line); }
+}
+.pane, .panes, .top { min-width: 0; }
+.placeholder { color: var(--ink-dim); font-style: italic; border: 1px dashed var(--line);
+  padding: 16px; margin: 0; }
 
 /* ── Picker ────────────────────────────────────────────────────────────── */
 .picker { padding: 24px 16px; max-width: 480px; margin: 0 auto; }

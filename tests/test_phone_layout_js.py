@@ -108,9 +108,20 @@ out([[900, true], [1440, true], [1440, false], [1920, false]]
         self.assertEqual(res, ["desktop"] * 4)
 
     # D2 — a narrow window with a mouse (not touch) is desktop.
-    def test_narrow_mouse_is_desktop(self):
-        res = self.run_js("out(chooseLayout({width: 375, coarse: false, saved: null}));")
-        self.assertEqual(res, "desktop")
+    # D2: "a wider screen gets the desktop layout". A window too narrow for
+    # two columns gets the phone layout even with a mouse (a 400–560 px
+    # desktop window clipped the side-by-side layout); 700 px and up with a
+    # mouse stays desktop.
+    def test_narrow_mouse_is_phone(self):
+        res = self.run_js("""
+out([
+  chooseLayout({width: 375, coarse: false, saved: null}),
+  chooseLayout({width: 561, coarse: false, saved: null}),
+  chooseLayout({width: 699, coarse: false, saved: null}),
+  chooseLayout({width: 700, coarse: false, saved: null}),
+  chooseLayout({width: 899, coarse: false, saved: null}),
+]);""")
+        self.assertEqual(res, ["phone", "phone", "phone", "desktop", "desktop"])
 
     # AC2 — the saved switch overrides the device in both directions.
     def test_saved_choice_wins(self):

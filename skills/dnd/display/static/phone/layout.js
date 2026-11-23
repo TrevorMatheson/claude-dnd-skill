@@ -11,11 +11,13 @@
 
   const LAYOUT_KEY = 'dnd-phone-layout';
   const PHONE_MAX_WIDTH = 900;   // below this, a touch screen is a phone
+  const NARROW_WIDTH = 700;      // below this, two columns don't fit with any pointer
 
   function chooseLayout(o) {
     o = o || {};
     if (o.saved === 'phone' || o.saved === 'desktop') return o.saved;
     const w = Number(o.width) || 0;
+    if (w > 0 && w < NARROW_WIDTH) return 'phone';
     return o.coarse && w < PHONE_MAX_WIDTH ? 'phone' : 'desktop';
   }
 
@@ -36,7 +38,7 @@
     return tabs;
   }
 
-  const api = { LAYOUT_KEY, PHONE_MAX_WIDTH, chooseLayout, combatOn, mapAllowed, tabsFor };
+  const api = { LAYOUT_KEY, PHONE_MAX_WIDTH, NARROW_WIDTH, chooseLayout, combatOn, mapAllowed, tabsFor };
   if (root) { root.PH = root.PH || {}; root.PH.layout = api; }
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : null);
