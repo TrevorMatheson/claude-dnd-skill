@@ -656,6 +656,10 @@ def _turn_location(turn: dict) -> "dict | None":
     name, look = loc.get("name"), loc.get("look", "")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("location needs a name (text)")
+    if not any(ch.isalnum() for ch in name):
+        # The server finds the picture by a file-safe form of the name; one
+        # with no letters or digits has none and would be silently ignored.
+        raise ValueError("location name needs at least one letter or digit")
     if len(name) > _LOCATION_NAME_MAX:
         raise ValueError(f"location name is over {_LOCATION_NAME_MAX} characters")
     if not isinstance(look, str):

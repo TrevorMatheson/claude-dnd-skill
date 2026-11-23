@@ -142,6 +142,14 @@ class TurnLocation(unittest.TestCase):
     def test_non_string_look_rejected(self):
         self._assert_rejected({"name": "Cave", "look": 42})
 
+    def test_name_without_letters_rejected(self):
+        # The server keys pictures by a file-safe form of the name; "!!!" has
+        # none, so the server would drop it silently (QA verify S1-S3).
+        for name in ("!!!", "---", "..."):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    send._turn_location({"location": {"name": name, "look": "x"}})
+
     def test_validator_raises_value_error(self):
         """Assumed interface (plan S3): send._turn_location(turn)."""
         self.assertTrue(hasattr(send, "_turn_location"), "send._turn_location missing")
