@@ -3351,6 +3351,132 @@ def sheet_get(name):
                     "path_ok": bool(info)})
 
 
+# ─── Sheet changes (phone sheet spec D6, D7, D9, D10, D14) ───────────────────
+# Claude's turn call (source "dm", the game computer only) and a player's
+# pencil (source "player", an approved device, D7 fields only) both send
+# differences. The file is the record; the TV's Party panel and every phone
+# are updated from it. A repeated `op` id returns the first result and changes
+# nothing, so a Retry after a lost reply never applies twice.
+from collections import OrderedDict as _OrderedDict
+
+_sheet_ops: "_OrderedDict[str, tuple]" = _OrderedDict()
+_sheet_ops_lock = threading.Lock()
+_SHEET_OPS_MAX = 512
+_SHEET_RATE = 120        # sheet writes per IP per minute (own bucket)
+
+
+def _sheet_op_get(op: str):
+    with _sheet_ops_lock:
+        return _sheet_ops.get(op)
+
+
+def _sheet_op_put(op: str, result) -> None:
+    with _sheet_ops_lock:
+        _sheet_ops[op] = result
+        while len(_sheet_ops) > _SHEET_OPS_MAX:
+            _sheet_ops.popitem(last=False)
+
+
+def _sync_stats_from_sheet(name: str, sh: dict) -> None:
+    """Put the file's resource values on the TV's player record and tell every
+    screen: {"stats"} for the TV and old page, {"sheet"} for phones."""
+    combat = sh.get("combat") or {}
+    with _stats_lock:
+        players = _current_stats.setdefault("players", [])
+        key = name.strip().lower()
+        sheet_name = str(sh.get("name") or name).strip().lower()
+        p = next((x for x in players if str(x.get("name", "")).strip().lower() in (key, sheet_name)), None)
+        if p is not None:
+            hp = combat.get("hp") or {}
+            if hp.get("current") is not None:
+                cur = p.get("hp") if isinstance(p.get("hp"), dict) else {}
+                p["hp"] = {**cur, "current": hp["current"], "max": hp.get("max", cur.get("max")),
+                           "temp": combat.get("temp_hp", 0)}
+            if "conditions" in combat:
+                p["conditions"] = list(combat["conditions"])
+            if "inspiration" in combat:
+                p["inspiration"] = bool(combat["inspiration"])
+            hd = combat.get("hit_dice")
+            if hd:
+                p["hit_dice"] = {"remaining": hd["remaining"], "max": hd["total"]}
+            slots = sh.get("slots")
+            if isinstance(slots, list):
+                p["spell_slots"] = {str(s["level"]): {"used": s["used"], "max": s["total"]} for s in slots}
+            snap = dict(_current_stats)
+        else:
+            snap = None
+    if snap is not None:
+        _persist_stats()
+        _broadcast({"stats": snap})
+    _broadcast({"sheet": {"name": sh.get("name") or name}})
+
+
+def _apply_sheet_change(name: str, changes, source: str, dry_run: bool = False,
+                        campaign: Optional[str] = None) -> dict:
+    """Apply changes for one character and update every screen. Used by the
+    route and by the hand-edit notes (S5)."""
+    import sheet as _sheet
+    result = _sheet.change(campaign or _active_campaign_name(), name, changes,
+                           source=source, dry_run=dry_run)
+    if result.get("ok") and not dry_run and result.get("sheet"):
+        _sync_stats_from_sheet(name, result["sheet"])
+        _sheet_changed(name, result, source)
+    return result
+
+
+def _sheet_changed(name: str, result: dict, source: str) -> None:
+    """Hook for what follows a change (S5 adds the note for Claude)."""
+    return None
+
+
+@app.route("/sheet/<path:name>/change", methods=["POST"])
+def sheet_change(name):
+    """Body: {op, source: "player"|"dm", changes: [...], dry_run?}."""
+    if not _token_ok():
+        return jsonify({"ok": False, "reason": "forbidden"}), 403
+    ip = request.remote_addr or ""
+    if not _rate_ok(f"sheet:{ip}", _SHEET_RATE):
+        return jsonify({"ok": False, "reason": "too many changes, wait a moment"}), 429
+    name = name.strip()
+    if not _CHAR_NAME_RE.match(name) or "/" in name or "\\" in name or ".." in name:
+        return jsonify({"ok": False, "reason": "bad character name"}), 400
+    data = request.get_json(silent=True) or {}
+    source = data.get("source", "player")
+    if source not in ("player", "dm"):
+        return jsonify({"ok": False, "reason": "source is player or dm"}), 400
+    if source == "dm" and not _host_only():
+        return jsonify({"ok": False, "reason": "only the game computer sends DM changes"}), 403
+    if source == "player":
+        status = _device_ok(request.headers.get("X-DND-Device", ""), ip)
+        if status == "pending":
+            return jsonify({"ok": False, "reason": "waiting for the DM to approve this device",
+                            "pending": True}), 202
+        if status != "approved":
+            return jsonify({"ok": False, "reason": "this device isn't allowed"}), 403
+    changes = data.get("changes")
+    if isinstance(changes, dict):
+        changes = [changes]
+    if not isinstance(changes, list) or not changes or len(changes) > 50:
+        return jsonify({"ok": False, "reason": "changes must be a list of 1 to 50"}), 400
+    # Every entry is for the character in the URL.
+    for c in changes:
+        if isinstance(c, dict) and c.get("name") and str(c["name"]).strip().lower() != name.lower():
+            return jsonify({"ok": False, "reason": "a change names another character"}), 400
+    dry_run = bool(data.get("dry_run"))
+    op = str(data.get("op") or "")[:80]
+    if op and not dry_run:
+        seen = _sheet_op_get(op)
+        if seen is not None:
+            body, code = seen
+            return jsonify({**body, "repeat": True}), code
+    result = _apply_sheet_change(name, changes, source, dry_run=dry_run)
+    body = {k: v for k, v in result.items() if k != "sheet"}
+    code = 200 if result.get("ok") else 409
+    if op and not dry_run:
+        _sheet_op_put(op, (body, code))
+    return jsonify(body), code
+
+
 @app.route("/device/approve", methods=["POST"])
 def device_approve():
     """DM approves a pending device. Body: {"id": "<device_id>"}"""
