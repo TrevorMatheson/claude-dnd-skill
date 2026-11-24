@@ -140,6 +140,7 @@ body { font-family: var(--f-body); overflow: hidden; }
 .pc-name { font-family: var(--f-display); font-size: 2rem; line-height: 1.1; }
 .pc-hp { font-size: 1.75rem; font-variant-numeric: tabular-nums; color: var(--ink-dim); white-space: nowrap; }
 .pc-hp b { color: var(--ink); font-weight: 500; }
+.pc-temp { color: var(--you); font-size: .7em; }
 .bar { height: .5rem; border-radius: 99px; background: rgba(255,255,255,.10); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--hp); border-radius: inherit; transition: width .6s ease; }
 .bar i.low { background: var(--hp-low); }

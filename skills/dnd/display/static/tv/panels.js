@@ -21,6 +21,8 @@
       return {
         name: String(p.name || '—'),
         hp: { current: hp.current, max: hp.max },
+        // Temp HP from the character file (phone sheet AC5); 0 when none.
+        temp: Math.max(0, Number(hp.temp) || 0),
         hpPct,
         low: hasBoth && hpPct <= 35,
         conditions: list(p.conditions).map(String),
@@ -173,7 +175,7 @@
     if (!pcs.length) return '<p class="mod-empty">No one has joined yet</p>';
     return pcs.map((pc) => {
       const hp = pc.hp.current != null || pc.hp.max != null
-        ? `<span class="pc-hp"><b>${esc(pc.hp.current ?? '—')}</b> / ${esc(pc.hp.max ?? '—')}</span>` : '';
+        ? `<span class="pc-hp"><b>${esc(pc.hp.current ?? '—')}</b> / ${esc(pc.hp.max ?? '—')}${pc.temp > 0 ? ` <span class="pc-temp">+${esc(pc.temp)} temp</span>` : ''}</span>` : '';
       const chips = pc.conditions.map((c) => `<span class="chip">${esc(c)}</span>`).join('');
       const cls = pc.meta ? `<span class="pc-class">${esc(pc.meta)}</span>` : '';
       const meta = cls || chips ? `<div class="pc-meta${chips ? '' : ' plain'}">${cls}${chips}</div>` : '';
