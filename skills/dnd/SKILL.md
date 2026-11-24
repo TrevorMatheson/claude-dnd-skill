@@ -388,10 +388,12 @@ python3 ${CLAUDE_SKILL_DIR}/display/send.py --turn "$CAMP_DIR/.turn.json"
    {"text": "The blade catches the rat mid-leap..."},
    {"npc": "Mira", "text": "Two more in the rafters!"},
    {"tutor": true, "text": "Anony: a Dexterity save is d20 + your DEX save bonus; 13 or more succeeds."}],
- "stats": {"players": [{"name": "Havoc", "hp": {"current": 9, "max": 12}}]},
+ "changes": [{"name": "Havoc", "damage": 3}],
  "turn": "Anony", "awaiting": ["Anony"],
  "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3, "label": "Dex save", "dc": 13, "wait": true}}
 ```
+**Resources go in `changes`, as differences — never as totals, never by editing the sheet.** Whenever the narration uses something up or restores it, add one entry per resource: `{"name": "Havoc", "damage": 7}` (temp HP absorbs it first), `{"name": "Havoc", "heal": 5}`, `{"name": "Havoc", "temp_hp": 5}`, `{"name": "Mira", "slot": 2, "delta": -1}` (−1 spends a level-2 slot, +1 regains one), `{"name": "Mira", "hit_dice": -1}`, `{"name": "Mira", "item": "Potion of Healing", "delta": -1}` (+N gains), `{"name": "Mira", "gold": {"gp": -5}}`, `{"name": "Havoc", "condition": "Poisoned", "on": true}`, `{"name": "Havoc", "death_saves": "failure", "delta": 1}`, `{"name": "Havoc", "inspiration": false}`. The display writes them to the character file, and the phones and the TV's Party panel update from it. They are checked before anything is sent: a refusal ("has 3 gp", "no level-3 spell slots") rejects the whole turn — fix the turn and resend. While the display runs, don't edit HP, temp HP, slots, hit dice, conditions, inventory, gold or death saves in a character file by hand (two writers lose a change), and don't put `hp` in `stats.players` (it's a total). Ability scores, level-ups, features, proficiencies and max HP are still yours to edit. If send.py prints `NOT APPLIED (display offline)`, make those changes in the file by hand. Players can also change these on their phones; each hand edit reaches you in front of the next input as a `[Sheet]` line such as `[Sheet] Havoc: −7 HP (12→5)` — take it as the new value, and correct it with a `changes` entry if it's wrong.
+
 `awaiting` names whose Send ends the turn — that player's single Send goes through without the others pressing skip. Use `"party"` when everyone should answer. Without it, a `turn` pointing at a PC does the same. A bad block (no text, two kinds, unknown key) rejects the whole turn before anything is sent. The single-purpose sends below still work.
 
 *Player actions* — before responding, send a cleaned version to the display:

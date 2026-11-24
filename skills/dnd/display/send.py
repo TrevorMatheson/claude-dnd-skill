@@ -542,6 +542,10 @@ def dice_request(chars, spec="1d20", modifier=0, advantage="normal", label=None,
 #    "awaiting": ["Anony"],                # whose Send completes the turn ("party" = all)
 #    "moves": [{"name": "Giant Rat", "x": 4, "y": 6, "hp": "3/7"}],  # battle map (combat.py map):
 #                                          # checked against walls and speed before anything is sent
+#    "changes": [{"name": "Havoc", "damage": 7},       # resources, as differences:
+#                {"name": "Anony", "slot": 1, "delta": -1}],   # applied to the character
+#                                          # files by the display (see sheet.py); checked
+#                                          # before anything is sent, applied last
 #    "dice_request": {"character": "Anony", "spec": "1d20", "modifier": 3,
 #                     "label": "Dex save", "dc": 13, "wait": true}}
 #
@@ -668,10 +672,118 @@ def _apply_turn_moves(turn: dict) -> "dict | None":
     return bm.display_payload(m)
 
 
+# ── Resource changes in a turn (phone sheet spec D6, D10) ─────────────────────
+# "changes": [{"name": "Havoc", "damage": 7}, {"name": "Mira", "slot": 1, "delta": -1}, ...]
+# Each entry is a difference for one character and one resource (see
+# sheet.py). The display applies them to the character files and every
+# screen updates from the file. They are checked (shape, then a dry run on the
+# display) before anything in the turn is sent, and applied last.
+
+def _turn_changes(turn: dict) -> "dict[str, list]":
+    """{name: [entries]} in the order given; raises ValueError on a bad entry."""
+    raw = turn.get("changes")
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise ValueError('"changes" must be a list')
+    import sheet as _sheet
+    by_name: "dict[str, list]" = {}
+    for i, e in enumerate(raw, 1):
+        if not isinstance(e, dict) or not str(e.get("name") or "").strip():
+            raise ValueError(f"change {i} needs a character name")
+        try:
+            _sheet.validate(e, _sheet.DM_FIELDS)
+        except _sheet.ChangeError as exc:
+            raise ValueError(f"change {i} ({e.get('name')}): {exc}")
+        by_name.setdefault(str(e["name"]).strip(), []).append(e)
+    return by_name
+
+
+def _post_json(url: str, body: dict, token: str) -> "tuple[int, dict]":
+    """POST JSON and return (status, body). 0 = display offline/unreachable.
+    One retry on a dropped connection; the body's op id makes that safe."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-DND-Token"] = token
+    data = json.dumps(body).encode("utf-8")
+    if not _display_up(url):
+        return 0, {"reason": "display offline"}
+    for i in range(RETRIES + 1):
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            resp = urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
+            return getattr(resp, "status", 200), json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            except Exception:
+                return e.code, {}
+        except Exception as e:
+            if i == RETRIES:
+                return 0, {"reason": str(getattr(e, "reason", e))}
+            time.sleep(0.5)
+    return 0, {}
+
+
+def _change_url(name: str) -> str:
+    from urllib.parse import quote
+    return f"{BASE_URL}/sheet/{quote(name, safe='')}/change"
+
+
+def _describe(e: dict) -> str:
+    keys = [k for k in e if k != "name"]
+    return f"{e.get('name')} " + " ".join(f"{k} {json.dumps(e[k], ensure_ascii=False)}" for k in keys)
+
+
+def _dry_run_changes(by_name: dict, token: str) -> "str | None":
+    """None when every change would apply (or the display is offline);
+    otherwise the reason, and nothing in the turn is sent."""
+    for name, entries in by_name.items():
+        status, body = _post_json(_change_url(name), {"source": "dm", "dry_run": True,
+                                                      "changes": entries}, token)
+        if status == 0:
+            return None
+        if status != 200 or not body.get("ok"):
+            return f"{name}: {body.get('reason') or f'HTTP {status}'}"
+    return None
+
+
+def _result_line(name: str, r: dict) -> str:
+    f, b, a = r.get("field"), r.get("before"), r.get("after")
+    label = {"hp": "HP", "temp_hp": "temp HP", "hit_dice": "hit dice left",
+             "slot": f"level-{r.get('level')} slots left", "item": str(r.get("item")),
+             "condition": str(r.get("condition")), "death_saves": f"death save {r.get('kind')}",
+             "note": "note"}.get(f, f)
+    return f"{name}: {label} {b}→{a}"
+
+
+def _apply_changes(by_name: dict, token: str) -> int:
+    """Apply the changes for real (last in the turn). Returns an exit code."""
+    import uuid
+    code = 0
+    for name, entries in by_name.items():
+        op = f"turn-{uuid.uuid4().hex}"
+        status, body = _post_json(_change_url(name), {"source": "dm", "op": op,
+                                                      "changes": entries}, token)
+        if status == 0:
+            for e in entries:
+                print(f"send.py: NOT APPLIED (display offline): {_describe(e)} "
+                      f"— apply it to the character file by hand", file=sys.stderr)
+            continue
+        if status != 200 or not body.get("ok"):
+            print(f"send.py: changes for {name} refused: {body.get('reason') or f'HTTP {status}'}",
+                  file=sys.stderr)
+            code = 3
+            continue
+        for r in body.get("results") or []:
+            print(f"send.py: {_result_line(name, r)}", file=sys.stderr)
+    return code
+
+
 def send_turn(turn: dict, as_json: bool = False) -> int:
     """Send a whole DM turn in order. Returns a process exit code."""
     unknown = set(turn) - {"blocks", "stats", "turn", "round", "awaiting", "moves", "dice_request",
-                           "campaign"}
+                           "campaign", "changes"}
     if unknown:
         print(f"send.py: --turn has unknown keys: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 2
@@ -686,12 +798,21 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
             print(f"send.py: --turn block invalid: {'; '.join(issues)}", file=sys.stderr)
             return 2
     try:
+        changes = _turn_changes(turn)
+    except ValueError as exc:
+        print(f"send.py: --turn: {exc} — nothing was sent", file=sys.stderr)
+        return 2
+    token = _read_token()
+    refused = _dry_run_changes(changes, token) if changes else None
+    if refused:
+        print(f"send.py: --turn: change refused: {refused} — nothing was sent", file=sys.stderr)
+        return 2
+    try:
         map_payload = _apply_turn_moves(turn)
     except ValueError as exc:
         print(f"send.py: --turn: {exc} — nothing was sent", file=sys.stderr)
         return 2
 
-    token = _read_token()
     for p in payloads:
         _post(FLASK_URL, json.dumps(p).encode("utf-8"), token)
     stats = _turn_stats(turn)
@@ -700,6 +821,9 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
         stats["map"] = map_payload
     if stats:
         _post(STATS_URL, json.dumps(stats).encode("utf-8"), token)
+    # Resource changes last, so the file's values win over any absolute HP
+    # in "stats" (D10: differences, never totals).
+    change_code = _apply_changes(changes, token) if changes else 0
 
     failed = [x for x in _SEND_LOG if not x["ok"]]
     if failed:
@@ -719,7 +843,7 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
                             dr.get("advantage", "normal"), dr.get("label"), dr.get("dc"),
                             wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", DEFAULT_WAIT)),
                             as_json=as_json)
-    return 0
+    return change_code
 
 
 def main() -> None:

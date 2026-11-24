@@ -525,7 +525,7 @@ Run `scripts/dice.py <notation>`. Display output verbatim. Examples: `d20`, `2d6
    ```
 4. Save STATE_JSON to `state.md` under `## Active Combat`.
 5. Step through turns using the per-turn sequence (in SKILL.md Active DM Mode).
-6. On combat end: update HP in character sheets, clear `## Active Combat`, run `combat.py end` (with a battle map up: `combat.py end --clear-map -c <campaign>`, which also deletes the map; the turn order clears and the TV leaves combat mode), narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear` (ends encounter conditions and round-long effects; minute/hour effects, exhaustion and petrification stay).
+6. On combat end: HP is already in the character sheets when the display ran the fight (every hit went through `changes` in the turn call); without the display, update HP in character sheets. Then clear `## Active Combat`, run `combat.py end` (with a battle map up: `combat.py end --clear-map -c <campaign>`, which also deletes the map; the turn order clears and the TV leaves combat mode), narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear` (ends encounter conditions and round-long effects; minute/hour effects, exhaustion and petrification stay).
 
 **XP awards** go in the final display send:
 ```bash
@@ -546,7 +546,7 @@ DNDEND
 Rests run on in-game time. `calendar.py rest` advances the clock **and** the tracker's timed effects by the same hour or eight hours, so an 8-hour Mage Armor survives a short rest and is spent by a long one. Without a calendar, use `tracker.py -c <campaign> rest short|long` instead. Neither wipes effects — **do not run `tracker.py clear` for a rest**; it is for the end of an encounter.
 
 **Short (1 hour):**
-1. Ask how many Hit Dice the player spends. Resolve them with `character.py hitdie --die d<N> --con-mod <M> --hp <cur> --max-hp <max> --remaining <R> --count <K> -c <campaign>` — each die heals its roll + CON mod (never below 0 in 2014, 1 in 2024), HP stops at max, and it refuses a character at 0 HP or with no dice left. Update HP, push `push_stats.py --player NAME --hp`, and `--hit-dice-use` once per die.
+1. Ask how many Hit Dice the player spends. Resolve them with `character.py hitdie --die d<N> --con-mod <M> --hp <cur> --max-hp <max> --remaining <R> --count <K> -c <campaign>` — each die heals its roll + CON mod (never below 0 in 2014, 1 in 2024), HP stops at max, and it refuses a character at 0 HP or with no dice left. With the display running, send the result as `changes` in the turn call — `{"name": NAME, "heal": <healed>}` and `{"name": NAME, "hit_dice": -<K>}` — which updates the sheet and every screen; without it, update HP and remaining Hit Dice in the sheet.
 2. Note class features that recharge (e.g. Second Wind → `push_stats.py --player NAME --second-wind true`).
 3. Advance time: `calendar.py -c <campaign> rest short`
 
