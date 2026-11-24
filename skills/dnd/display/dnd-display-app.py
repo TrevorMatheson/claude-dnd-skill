@@ -3425,8 +3425,17 @@ def _apply_sheet_change(name: str, changes, source: str, dry_run: bool = False,
 
 
 def _sheet_changed(name: str, result: dict, source: str) -> None:
-    """Hook for what follows a change (S5 adds the note for Claude)."""
-    return None
+    """A player's hand edit is applied at once and Claude is told with the
+    next input (D9): "[Sheet] Havoc: −7 HP (12→5)". Claude's own changes need
+    no note."""
+    if source != "player":
+        return
+    try:
+        import sheet_notes
+        shown = str((result.get("sheet") or {}).get("name") or name)
+        sheet_notes.add(os.path.dirname(QUEUE_FILE), shown, result.get("results") or [])
+    except Exception:
+        pass
 
 
 @app.route("/sheet/<path:name>/change", methods=["POST"])
@@ -3859,6 +3868,12 @@ def rewind_turn():
     with _dice_pending_lock:
         _dice_pending.clear()
     _rewind.write_note(os.path.dirname(QUEUE_FILE), _rewind.dm_note(meta))
+    # Hand edits since then were undone with the files: nothing to tell Claude.
+    try:
+        import sheet_notes
+        sheet_notes.clear(os.path.dirname(QUEUE_FILE))
+    except Exception:
+        pass
     with _text_log_lock:
         recent = list(_text_log)[-200:]
     with _stats_lock:

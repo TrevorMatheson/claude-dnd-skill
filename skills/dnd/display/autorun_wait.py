@@ -104,5 +104,12 @@ if content:
             content = note + "\n" + content
     except Exception:
         pass
+    try:
+        import sheet_notes          # players' hand edits (phone sheet D9)
+        lines = sheet_notes.take_lines(RT)
+        if lines:
+            content = "\n".join(lines) + "\n" + content
+    except Exception:
+        pass
 
 sys.stdout.write(content)

@@ -98,6 +98,12 @@ try:
                     print(note)
             except Exception:
                 pass
+            try:
+                import sheet_notes      # players' hand edits (phone sheet D9)
+                for ln in sheet_notes.take_lines(os.path.dirname(QUEUE_FILE)):
+                    print(ln)
+            except Exception:
+                pass
             for d in (_roll_directives(), _narration_directive()):
                 if d:
                     print(d)
