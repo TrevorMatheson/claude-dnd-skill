@@ -951,7 +951,12 @@ def _do_note(doc, e, key):
         doc.lines += ["", "## Backstory & Notes", f"- {text}"]
         return [_r("note", False, True, note=text)]
     for i in range(*sec):
-        if _BULLET.sub("", doc.lines[i].strip(), count=1).strip() == text:
+        line = doc.lines[i].strip()
+        if not _BULLET.match(line):
+            continue
+        # The phone shows notes without markdown bold, so compare that way.
+        bare = " ".join(_BULLET.sub("", line, count=1).replace("**", "").split())
+        if bare == text.replace("**", ""):
             if on:
                 return [_r("note", True, True, note=text, changed=False)]
             del doc.lines[i]
