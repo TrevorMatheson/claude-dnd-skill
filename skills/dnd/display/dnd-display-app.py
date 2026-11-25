@@ -3019,6 +3019,13 @@ def player_dice():
         return "Forbidden", 403
 
     data = request.get_json(force=True, silent=True) or {}
+    # /phone sends an op id with each roll; a Retry after a lost reply gets
+    # the first roll back instead of a second one (phone sheet D14).
+    op = str(data.get("op") or "")[:80]
+    if op:
+        seen = _sheet_op_get("dice:" + op)
+        if seen is not None:
+            return jsonify(seen[0]), seen[1]
     character = re.sub(r"[`\\$]", "", str(data.get("character", "Player"))[:50]).strip() or "Player"
     spec      = str(data.get("spec", "1d20")).strip().lower()
     modifier  = int(data.get("modifier", 0) or 0)
@@ -3140,7 +3147,7 @@ def player_dice():
     if to_queue:
         _queue_roll_for_dm("\n".join(to_queue), character)
 
-    return jsonify({
+    result = {
         "character": character,
         "spec": spec,
         "modifier": modifier,
@@ -3153,7 +3160,11 @@ def player_dice():
         "text": text,
         "physical": physical,
         "request_id": req_id or None,
-    }), 200
+    }
+    result["asked"] = asked
+    if op:
+        _sheet_op_put("dice:" + op, (result, 200))
+    return jsonify(result), 200
 
 
 @app.route("/dice-request", methods=["POST"])
@@ -3520,6 +3531,11 @@ def stage_input():
     """Stage a player action for review. Broadcasts staged_inputs to all displays.
 
     Body: {"character": "Mira", "text": "draws her rapier"}
+    Optional (used by /phone, phone sheet D14):
+      "ready": true   — staged and sent in one request (no separate /ready)
+      "append": true  — joined to this character's still-staged text with
+                        " then " instead of replacing it (413 past 500 chars)
+      "op": "<id>"    — a repeat of the same op is not staged twice
     """
     if not _token_ok():
         return "Forbidden", 403
@@ -3536,6 +3552,9 @@ def stage_input():
     data      = request.get_json(force=True, silent=True) or {}
     character = str(data.get("character", ""))[:50].strip()
     text      = _sanitize_input(str(data.get("text", "")))
+    op        = str(data.get("op") or "")[:80]
+    if op and _sheet_op_get("stage:" + op) is not None:
+        return "", 204
 
     if not character or not text:
         return "Bad Request", 400
@@ -3551,17 +3570,26 @@ def stage_input():
     solo = (_expected_count == 1) or bool(
         awaited and len(awaited) == 1 and awaited[0].lower() == character.lower())
 
+    ready = solo or bool(data.get("ready"))
     with _staged_lock:
+        prev = _staged.get(character)
+        if data.get("append") and prev and prev.get("text"):
+            joined = f"{prev['text']} then {text}"
+            if len(joined) > 500:
+                return jsonify({"error": "too long: send what you have first"}), 413
+            text = joined
         _staged[character] = {
             "text":      text,
-            "ready":     solo,
+            "ready":     ready,
             "timestamp": _time.time(),
         }
         snap = _staged_snapshot()
+    if op:
+        _sheet_op_put("stage:" + op, ({}, 204))
 
     _broadcast({"staged_inputs": snap})
 
-    if solo:
+    if ready:
         _check_auto_trigger()
 
     return "", 204
