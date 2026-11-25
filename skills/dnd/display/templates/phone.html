@@ -14,6 +14,7 @@
 <link rel="apple-touch-icon" href="/icons/app_icon_180.png">
 <link rel="stylesheet" href="/static/tv/tokens.css">
 <link rel="stylesheet" href="/static/phone/phone.css">
+{% if map_board %}<link rel="stylesheet" href="/static/map/map.css">{% endif %}
 </head>
 <body data-layout="phone" data-tab="play">
 <div id="phone-app" class="app">
@@ -61,6 +62,10 @@
 <script src="/static/phone/talk.js"></script>
 <script src="/static/phone/play.js"></script>
 <script src="/static/phone/sheet.js"></script>
+{% if map_board %}<!-- The battle map's own board and fog (milestone 2), when installed. -->
+<script src="/static/map/board.js"></script>
+<script src="/static/map/los.js"></script>
+{% endif %}<script src="/static/phone/maptab.js"></script>
 <script src="/static/phone/phone.js"></script>
 </body>
 </html>

@@ -269,3 +269,17 @@ body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid va
 .link { background: none; border: 0; padding: 0; color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 .spell-text { list-style: none; padding: 8px 10px; margin: 4px 0 8px; border-left: 2px solid var(--you); font-size: .88rem; }
 .spell-text h4, .spell-text p { margin: 4px 0; }
+
+/* ── Map tab (D13, milestone 2) ────────────────────────────────────────── */
+.map-body { display: flex; flex-direction: column; gap: 8px; }
+.mt-view { position: relative; overflow: auto; -webkit-overflow-scrolling: touch;
+  height: calc(100vh - 57px - 60px - 64px - env(safe-area-inset-bottom)); border: 1px solid var(--line); background: var(--map-wall); }
+body[data-layout="desktop"] .mt-view { height: 70vh; }
+.mt-box { position: relative; }
+.mt-overlay { position: absolute; left: 0; top: 0; pointer-events: none; }
+.mt-path { fill: none; stroke: var(--you); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 8; }
+.mt-path.bad, .mt-pick.bad { stroke: var(--accent); }
+.mt-pick { fill: rgba(169, 207, 224, .18); stroke: var(--you); stroke-width: 2; }
+.mt-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: var(--tap); }
+.mt-cost { font-family: var(--f-display); font-size: 1.2rem; font-weight: 600; flex: 1; }
+.mt-why { color: var(--accent); flex: 1; }
