@@ -150,6 +150,7 @@
     const sent = pick;
     root.PH.net.send('move', '/map/move', { character: app.me, x, y }, label).then((res) => {
       if (!res || res.notSent) return;
+      if (res.status === 202) { bar.innerHTML = '<span class="mt-why">Waiting for the DM to approve this phone</span>'; return; }
       if (res.ok) {
         pick = null; check = null; drawPick();
         bar.innerHTML = `<span class="mt-sent">Sent to the DM: ${esc(res.body && res.body.sent || label)}</span>`;

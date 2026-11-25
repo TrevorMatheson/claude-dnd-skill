@@ -839,10 +839,11 @@ def send_turn(turn: dict, as_json: bool = False) -> int:
         chars = dr.get("characters") or dr.get("character") or "any"
         if isinstance(chars, str):
             chars = [c.strip() for c in chars.split(",") if c.strip()] or ["any"]
-        return dice_request(chars, dr.get("spec", "1d20"), int(dr.get("modifier", 0)),
-                            dr.get("advantage", "normal"), dr.get("label"), dr.get("dc"),
-                            wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", DEFAULT_WAIT)),
-                            as_json=as_json)
+        rc = dice_request(chars, dr.get("spec", "1d20"), int(dr.get("modifier", 0)),
+                          dr.get("advantage", "normal"), dr.get("label"), dr.get("dc"),
+                          wait=bool(dr.get("wait")), wait_timeout=int(dr.get("wait_timeout", DEFAULT_WAIT)),
+                          as_json=as_json)
+        return rc or change_code
     return change_code
 
 

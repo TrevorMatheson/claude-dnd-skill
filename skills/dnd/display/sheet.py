@@ -548,6 +548,20 @@ def _as_int(v, what: str) -> int:
     return int(v)
 
 
+# A condition or item name sits inside a line of the file (often a comma
+# list), so it can't carry line breaks, table bars, list commas or markdown
+# markers: one hand-made request must never write a new line or heading.
+_BAD_NAME = re.compile(r"[\x00-\x1f\x7f|,#*\[\]<>`]")
+_BAD_TEXT = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _name_ok(v, what: str, limit: int) -> None:
+    if not isinstance(v, str) or not v.strip() or len(v) > limit:
+        raise ChangeError(f"{what} must be a name")
+    if _BAD_NAME.search(v) or v.strip().startswith(("-", "+")):
+        raise ChangeError(f"{what} can't contain line breaks, | , # * [ ] < > or `")
+
+
 def validate(entry, fields=DM_FIELDS) -> str:
     """Check an entry's shape and that `fields` allows it; return its key."""
     key = resource_of(entry)
@@ -565,8 +579,7 @@ def validate(entry, fields=DM_FIELDS) -> str:
             raise ChangeError("slot level must be 1 to 9")
         _as_int(entry.get("delta"), "delta")
     elif key == "item":
-        if not isinstance(v, str) or not v.strip() or len(v) > 80:
-            raise ChangeError("item must be a name")
+        _name_ok(v, "item", 80)
         _as_int(entry.get("delta"), "delta")
     elif key == "gold":
         if not isinstance(v, dict) or not v or any(c not in _COINS for c in v):
@@ -574,8 +587,7 @@ def validate(entry, fields=DM_FIELDS) -> str:
         for c, n in v.items():
             _as_int(n, c)
     elif key == "condition":
-        if not isinstance(v, str) or not v.strip() or len(v) > 40:
-            raise ChangeError("condition must be a name")
+        _name_ok(v, "condition", 40)
         if not isinstance(entry.get("on"), bool):
             raise ChangeError("condition needs on: true or false")
     elif key == "death_saves":
@@ -588,6 +600,8 @@ def validate(entry, fields=DM_FIELDS) -> str:
     elif key == "note":
         if not isinstance(v, str) or not v.strip() or len(v) > 300:
             raise ChangeError("note must be text")
+        if _BAD_TEXT.search(v) or v.lstrip().startswith("#"):
+            raise ChangeError("a note is one line of text")
         if not isinstance(entry.get("on"), bool):
             raise ChangeError("note needs on: true or false")
     return key
@@ -659,7 +673,8 @@ _HD_REM = re.compile(r"(remaining\s*:?\s*)(\d+)", re.IGNORECASE)
 _DS = re.compile(r"\*\*\s*Death Saves\s*:\s*\*\*", re.IGNORECASE)
 _INSP = _bold_val("Inspiration")
 _CONDS = _bold_val("Conditions")
-_CURRENCY = re.compile(r"^(\s*(?:[-*+]\s+)?\*\*\s*currency\s*:?\s*\*\*\s*:?\s*)(.*)$", re.IGNORECASE)
+_CURRENCY = re.compile(r"^(\s*(?:[-*+]\s+)?\*\*\s*(?:currency|gold|money|coins)\s*:?\s*\*\*\s*:?\s*)(.*)$",
+                       re.IGNORECASE)
 _YES = ("yes", "y", "true", "1", "✓", "heroic")
 
 

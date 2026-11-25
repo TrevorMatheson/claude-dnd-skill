@@ -54,8 +54,10 @@
     }
 
     // kind: 'roll' | 'action' | 'edit' | 'move'; label: what the player sees.
-    function send(kind, url, body, label) {
-      const entry = { id: nextId++, kind, url, body: body || {}, op: newOp(kind), label: label || kind };
+    // onRetry(res), when given, gets the answer to a later Retry of this item.
+    function send(kind, url, body, label, onRetry) {
+      const entry = { id: nextId++, kind, url, body: body || {}, op: newOp(kind), label: label || kind,
+                      onDone: typeof onRetry === 'function' ? onRetry : null };
       return attempt(entry).catch((err) => fail(entry, err));
     }
 

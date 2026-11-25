@@ -74,12 +74,18 @@ def check(campaign_dir, character: str, x: int, y: int, dash: bool = False) -> d
         m = bm.load(campaign_dir)
     except Exception as e:
         raise MoveError(f"no battle map: {e}")
+    # Only the tokens the players can see, plus the mover's own (a hiding
+    # rogue still moves). The name is looked up among those, so asking about
+    # a hidden creature answers exactly like asking about nobody.
     name = _token_name(m, character)
+    toks = m.get("tokens") or {}
+    if name is not None and toks[name].get("hidden") and str(toks[name].get("kind")) != "pc":
+        name = None
     if name is None:
         raise MoveError(f"{character} has no token on the map")
     seen = copy.deepcopy(m)
     seen["tokens"] = {n: t for n, t in (seen.get("tokens") or {}).items()
-                      if not (isinstance(t, dict) and t.get("hidden"))}
+                      if n == name or not (isinstance(t, dict) and t.get("hidden"))}
     out = bm.check_move(seen, name, int(x), int(y), dash=bool(dash))
     return {k: out.get(k) for k in FIELDS}
 

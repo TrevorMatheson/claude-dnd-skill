@@ -3372,13 +3372,32 @@ from collections import OrderedDict as _OrderedDict
 
 _sheet_ops: "_OrderedDict[str, tuple]" = _OrderedDict()
 _sheet_ops_lock = threading.Lock()
+# One sheet change at a time in this server, from the file write to the TV's
+# record, so two changes landing together can't leave the Party panel showing
+# the first one's result after the second (AC8).
+_sheet_apply_lock = threading.Lock()
+_OP_PENDING = ("pending",)
 _SHEET_OPS_MAX = 512
 _SHEET_RATE = 120        # sheet writes per IP per minute (own bucket)
 
 
 def _sheet_op_get(op: str):
     with _sheet_ops_lock:
-        return _sheet_ops.get(op)
+        got = _sheet_ops.get(op)
+        return None if got is _OP_PENDING else got
+
+
+def _sheet_op_reserve(op: str):
+    """Claim an op id before applying it: None when it's new (now reserved),
+    _OP_PENDING while another request with it is still running, else the
+    stored (body, code)."""
+    with _sheet_ops_lock:
+        got = _sheet_ops.get(op)
+        if got is None:
+            _sheet_ops[op] = _OP_PENDING
+            while len(_sheet_ops) > _SHEET_OPS_MAX:
+                _sheet_ops.popitem(last=False)
+        return got
 
 
 def _sheet_op_put(op: str, result) -> None:
@@ -3409,7 +3428,8 @@ def _sync_stats_from_sheet(name: str, sh: dict) -> None:
                 p["inspiration"] = bool(combat["inspiration"])
             hd = combat.get("hit_dice")
             if hd:
-                p["hit_dice"] = {"remaining": hd["remaining"], "max": hd["total"]}
+                old = p.get("hit_dice") if isinstance(p.get("hit_dice"), dict) else {}
+                p["hit_dice"] = {**old, "remaining": hd["remaining"], "max": hd["total"]}
             slots = sh.get("slots")
             if isinstance(slots, list):
                 p["spell_slots"] = {str(s["level"]): {"used": s["used"], "max": s["total"]} for s in slots}
@@ -3419,7 +3439,10 @@ def _sync_stats_from_sheet(name: str, sh: dict) -> None:
     if snap is not None:
         _persist_stats()
         _broadcast({"stats": snap})
-    _broadcast({"sheet": {"name": sh.get("name") or name}})
+    # Phones match on the name they were opened with (?char=), which can be
+    # shorter than the file's heading ("Havoc" for "Havoc Ironfist").
+    names = list(dict.fromkeys([str(sh.get("name") or name), str(name)]))
+    _broadcast({"sheet": {"name": names[0], "names": names}})
 
 
 def _apply_sheet_change(name: str, changes, source: str, dry_run: bool = False,
@@ -3427,11 +3450,15 @@ def _apply_sheet_change(name: str, changes, source: str, dry_run: bool = False,
     """Apply changes for one character and update every screen. Used by the
     route and by the hand-edit notes (S5)."""
     import sheet as _sheet
-    result = _sheet.change(campaign or _active_campaign_name(), name, changes,
-                           source=source, dry_run=dry_run)
-    if result.get("ok") and not dry_run and result.get("sheet"):
-        _sync_stats_from_sheet(name, result["sheet"])
-        _sheet_changed(name, result, source)
+    if dry_run:
+        return _sheet.change(campaign or _active_campaign_name(), name, changes,
+                             source=source, dry_run=True)
+    with _sheet_apply_lock:
+        result = _sheet.change(campaign or _active_campaign_name(), name, changes,
+                               source=source, dry_run=False)
+        if result.get("ok") and result.get("sheet"):
+            _sync_stats_from_sheet(name, result["sheet"])
+            _sheet_changed(name, result, source)
     return result
 
 
@@ -3484,16 +3511,26 @@ def sheet_change(name):
             return jsonify({"ok": False, "reason": "a change names another character"}), 400
     dry_run = bool(data.get("dry_run"))
     op = str(data.get("op") or "")[:80]
+    key = "sheet:" + op
     if op and not dry_run:
-        seen = _sheet_op_get(op)
+        seen = _sheet_op_reserve(key)
+        if seen is _OP_PENDING:
+            return jsonify({"ok": False, "reason": "still applying this change, try again in a moment",
+                            "pending": True}), 409
         if seen is not None:
             body, code = seen
             return jsonify({**body, "repeat": True}), code
-    result = _apply_sheet_change(name, changes, source, dry_run=dry_run)
+    try:
+        result = _apply_sheet_change(name, changes, source, dry_run=dry_run)
+    except Exception as e:                        # free the op for a Retry
+        if op and not dry_run:
+            with _sheet_ops_lock:
+                _sheet_ops.pop(key, None)
+        return jsonify({"ok": False, "reason": f"couldn't change the sheet: {e}"}), 500
     body = {k: v for k, v in result.items() if k != "sheet"}
     code = 200 if result.get("ok") else 409
     if op and not dry_run:
-        _sheet_op_put(op, (body, code))
+        _sheet_op_put(key, (body, code))
     return jsonify(body), code
 
 
@@ -3518,6 +3555,10 @@ def _map_move_request():
     character = str(data.get("character", ""))[:50].strip()
     if not character or not _CHAR_NAME_RE.match(character):
         return jsonify({"ok": False, "message": "bad character name"}), 400
+    with _stats_lock:
+        party = {str(p.get("name", "")).lower() for p in _current_stats.get("players", [])}
+    if character.lower() not in party:
+        return jsonify({"ok": False, "message": f"{character} isn't in the party"}), 403
     try:
         x, y = int(data.get("x")), int(data.get("y"))
     except (TypeError, ValueError):

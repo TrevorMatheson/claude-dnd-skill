@@ -373,8 +373,12 @@
   function wantsReload(p, me) {
     if (!p || typeof p !== 'object') return false;
     if (p.sheet && typeof p.sheet === 'object') {
-      const n = String(p.sheet.name || '').toLowerCase();
-      return !!me && n === String(me).toLowerCase();
+      // The server sends the file's heading and the name the change was made
+      // under; a phone opened as "Havoc" matches "Havoc Ironfist" too.
+      const m = String(me || '').toLowerCase();
+      const names = [p.sheet.name].concat(Array.isArray(p.sheet.names) ? p.sheet.names : [])
+        .map((n) => String(n || '').toLowerCase()).filter(Boolean);
+      return !!m && names.some((n) => n === m || n.split(' ')[0] === m);
     }
     return !!(p.rewind || p.rewound);
   }
@@ -395,12 +399,14 @@
   function sendChange(change, label) {
     const net = root.PH.net;
     if (!net || !net.send || !change) return;
-    net.send('edit', `/sheet/${encodeURIComponent(app.me)}/change`,
-      { source: 'player', changes: [change] }, label).then((res) => {
+    const answer = (res) => {
       if (!res || res.notSent) return;
       if (res.status === 202) { note('Waiting for the DM to approve this phone…', true); return; }
       if (!res.ok) note((res.body && res.body.reason) || 'That change was refused', true);
-    });
+    };
+    // `answer` also handles a Retry's reply (a refusal then is shown too).
+    net.send('edit', `/sheet/${encodeURIComponent(app.me)}/change`,
+      { source: 'player', changes: [change] }, label, answer).then(answer);
   }
 
   function itemFor(kind, i, key) {

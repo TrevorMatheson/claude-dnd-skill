@@ -221,7 +221,9 @@
       const text = ta.value.trim();
       if (!text) return;
       ta.value = '';
-      act(text).then((res) => { if (res && !res.ok && !res.notSent && res.status !== 202) ta.value = text; });
+      // Put the text back when nothing was staged: refused, or held while
+      // the DM approves this phone (202). A Not sent item keeps its own copy.
+      act(text).then((res) => { if (res && !res.notSent && (!res.ok || res.status === 202)) ta.value = text; });
     });
     drawPad();
 
