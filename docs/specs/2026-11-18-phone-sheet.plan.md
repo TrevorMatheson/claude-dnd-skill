@@ -27,6 +27,24 @@ architect's proposal, all made to keep it strictly inside the spec:
    today. Whether it should is a visual choice and is listed as "needs the
    user". It does not block the build.
 
+## Build notes (2026-11-24)
+
+- **QA per step stopped after S7, by the user's call:** "skip QA for now, we
+  will do one pass at the end". S1–S7 had QA tests first; S8 and S9 have
+  tests QA started before that; S10–S15 tests were written by the builder.
+  One QA verify pass covers the whole branch at the end.
+- **Combined commits:** S9 with S10 (Talk mounts inside the Play tab) and S11
+  with S12 (both live in sheet.js).
+- **`DM_FIELDS`** also allows `death_saves`, `inspiration` and `note`, so
+  Claude can track a dying character and inspiration through `changes`
+  ("nobody has to track it", D6). Players' fields are exactly D7.
+- **The Map tab was checked against the real battle map** in a throwaway
+  merge of `claude/battle-map-bd6cc1` (not committed): the merged suite
+  passed (1465 tests), and the phone showed the fogged map, the path and
+  cost, refused a wall, and sent "moves to square 1,6 - 20 of 35 ft" to
+  Claude. The merge conflicts in `send.py` (turn effects and `changes`) and
+  `CHANGELOG.md` are small; resolve them by keeping both sides.
+
 ## Facts from the code that shape the build
 
 None of these reopens a decision.
