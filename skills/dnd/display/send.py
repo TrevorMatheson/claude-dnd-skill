@@ -770,6 +770,12 @@ def _apply_changes(by_name: dict, token: str) -> int:
                 print(f"send.py: NOT APPLIED (display offline): {_describe(e)} "
                       f"— apply it to the character file by hand", file=sys.stderr)
             continue
+        if body.get("pending"):
+            # Our own retry met the first attempt still running: it is being
+            # applied once. Don't resend it.
+            print(f"send.py: changes for {name} are being applied (slow display) — "
+                  f"check the sheet before sending them again", file=sys.stderr)
+            continue
         if status != 200 or not body.get("ok"):
             print(f"send.py: changes for {name} refused: {body.get('reason') or f'HTTP {status}'}",
                   file=sys.stderr)

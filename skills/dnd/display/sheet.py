@@ -551,8 +551,8 @@ def _as_int(v, what: str) -> int:
 # A condition or item name sits inside a line of the file (often a comma
 # list), so it can't carry line breaks, table bars, list commas or markdown
 # markers: one hand-made request must never write a new line or heading.
-_BAD_NAME = re.compile(r"[\x00-\x1f\x7f|,#*\[\]<>`]")
-_BAD_TEXT = re.compile(r"[\x00-\x1f\x7f]")
+_BAD_NAME = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029|,#*\[\]<>`]")
+_BAD_TEXT = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 
 
 def _name_ok(v, what: str, limit: int) -> None:
