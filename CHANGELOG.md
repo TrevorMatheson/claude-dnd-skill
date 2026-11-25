@@ -19,6 +19,14 @@ From the first live table test (see `docs/ROADMAP.md`).
 - Player characters have voices; with "Read player actions aloud" on, typed actions are read in the character's voice before the DM answers (Talk isn't read back).
 - Rolling initiative starts combat mode and `combat.py end` finishes it.
 
+**Phone sheet (new player page, on trial at `/phone`)**
+- `/phone?char=<name>`: Play (Send, Talk, "Waiting on …", the DM's roll requests, dice with physical-die entry), Sheet and, in combat, Map. Tabs on a phone, side by side on a laptop, with a remembered Desktop/Phone switch. The old phone page is unchanged.
+- The sheet reads every section of the character file, and shows any section it can't read as plain text. It updates live.
+- Claude's turn call carries resource changes as differences (`"changes": [{"name": "Havoc", "damage": 7}, …]`): HP, temp HP, spell slots, hit dice, items, gold, conditions, death saves. The display writes them to the character file and the phones and the TV's Party panel (now with temp HP) update from it.
+- Players fix HP, slots, hit dice, death saves, inspiration, conditions, items, gold and notes with a small pencil; each edit is applied at once and reaches Claude with the next input as a `[Sheet]` line.
+- Tap a skill, save or attack to roll it; it answers the DM's request when it matches. Cast and Use send the action to Claude. A spell's name shows its rules text.
+- A roll, action or edit that can't reach the server shows Not sent with Retry and is never sent later on its own.
+
 **Table safety**
 - The test suite runs in a sandbox and can no longer overwrite the live TV's party, or post to a running display.
 - plugin.json / marketplace.json / SKILL.md versions match VERSION again (they said 2.4.0), with a test.

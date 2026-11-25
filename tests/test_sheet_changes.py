@@ -391,7 +391,7 @@ class TestChange(_CampaignMixin, unittest.TestCase):
         p = self.put("gbk.md", "Lin.md")
         out = _sheet().change(self.camp_name, "Lin", [{"item": "玉佩", "delta": -1}], source="player")
         self.assertTrue(out["ok"], out)
-        text = _sheet().read_text(p)
+        text = _sheet().read_file(p)
         s = _parse(text)
         self.assertEqual(s["name"], "Lin Yue")
         self.assertEqual(_items(s)["玉佩"][0], 1)
@@ -427,7 +427,7 @@ class TestChange(_CampaignMixin, unittest.TestCase):
                 t1.start(); t2.start(); t1.join(10); t2.join(10)
                 self.assertTrue(outs.get("dm", {}).get("ok"), outs)
                 self.assertTrue(outs.get("pl", {}).get("ok"), outs)
-                final = _parse(_sheet().read_text(p))
+                final = _parse(_sheet().read_file(p))
                 self.assertEqual(final["combat"]["hp"], {"current": 8, "max": 17},
                                  "damage 7 and hp +5 from 10 must end at 8")
                 self.assertEqual(final["name"], "Ysolde Varn", "file no longer parses")

@@ -187,6 +187,7 @@ def start(lan: bool) -> int:
             print(f"  On the TV (same network):   {scheme}://{ip}:{PORT}")
             print(f"  TV (new, on trial):         {scheme}://{ip}:{PORT}/tv")
             print(f"  On each phone:              {scheme}://{ip}:{PORT}/?char=<character name>")
+            print(f"  Phone (new, on trial):      {scheme}://{ip}:{PORT}/phone?char=<character name>")
             if not _ping(f"http://{ip}:{PORT}", timeout=2):
                 print("  ! That address doesn't answer from this machine - check the firewall "
                       "(`python doctor.py` in scripts/ explains the rule).")

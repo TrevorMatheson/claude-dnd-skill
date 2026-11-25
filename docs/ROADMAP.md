@@ -265,7 +265,8 @@ old page; S17 (switching `/`) waits on one real game night on `/tv`. The other f
    milestone 2. Needs the foundation's `/tv`.
 2. **Phone sheet** — `docs/specs/2026-11-18-phone-sheet.md` (approved):
    `/phone`, automatic resource tracking, tap-to-roll; the Map tab waits for
-   Map milestone 1.
+   Map milestone 1. Milestone 1 built on `claude/phone-sheet-695cf8`; the
+   table check (a game night on `/phone`) is next.
 3. **Pass the mic** — `docs/specs/2026-11-18-pass-the-mic.md` (approved):
    hold-to-talk on `/phone`, auto-send with undo, queue, typing always there.
 4. **Scene backgrounds** — `docs/specs/2026-11-18-scene-backgrounds.md`

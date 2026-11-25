@@ -92,6 +92,7 @@ at `/old` (phones keep it via `?char=`).
 | Page | Open it on | What it is |
 |---|---|---|
 | `/tv` | the TV | Story feed with narration typed in step with its voice, two side panels (party, turn order, battle map, quests, world clock), combat layouts with the map and a turn bar, reconnect catch-up |
+| `/phone?char=<name>` | each player's phone or laptop | The new player page: **Play** (Send, Talk, the "Waiting on …" banner, the DM's roll requests, dice), **Sheet** (the character sheet, kept up to date from the character file; tap a skill, save or attack to roll; Cast and Use go to the DM; a small pencil edits HP, slots, hit dice, items, gold, conditions and notes) and, in combat, **Map**. A narrow touch screen gets tabs, a wider one gets Play and Sheet side by side; the "Desktop / Phone version" switch overrides it per device. A write that can't reach the server shows **Not sent** with Retry and is never sent later on its own. |
 | `/layout` | this laptop (localhost only) | Layout presets and panels, the combat/story override, and **Voices**: narrator, NPC engine (Kokoro only, or Gemini falling back to Kokoro), volume, speed, "Read player actions aloud", the Gemini quota note, and the cast list |
 
 Settings are saved per campaign in `<campaign>/display.json`. Voices live
@@ -120,6 +121,9 @@ python $DISPLAY/cast.py set -c <campaign> --pc  "Name" am_liam
 | `audio.py` | Scans narration for SFX triggers; serves synthesized WAV files to browsers |
 | `index.html` | Typewriter rendering, sky canvas, particle system, CSS gradient crossfades |
 | `templates/tv.html`, `static/tv/` | The new TV page (`/tv`) |
+| `templates/phone.html`, `static/phone/` | The new player page (`/phone`); `talk.js` is the Talk button alone |
+| `sheet.py` | Reads a character file into sections for `/phone`, and applies resource changes to it as differences |
+| `sheet_notes.py` | Players' hand edits, read to the DM before the next input (`[Sheet] Havoc: −7 HP (12→5)`) |
 | `templates/layout.html`, `static/layout/` | The laptop's layout and voices page (`/layout`) |
 | `cast.py` | Who speaks in which voice (NPCs, player characters, narrator) |
 | `display_config.py` | Per-campaign `display.json` (layout and voice settings) |

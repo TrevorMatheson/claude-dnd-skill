@@ -485,7 +485,7 @@ def find(campaign: Optional[str], name: str):
     return None, False
 
 
-def read_text(path) -> str:
+def read_file(path) -> str:
     """The file as text: UTF-8, or legacy GBK read losslessly."""
     import utf8io
     return utf8io.read_text(path)
@@ -498,7 +498,7 @@ def load(campaign: Optional[str], name: str):
         where = f"campaign {campaign!r}" if campaign else "the roster (no campaign loaded)"
         return None, f"No character sheet for {name!r} in {where}"
     try:
-        text = read_text(path)
+        text = read_file(path)
     except (OSError, ValueError) as e:
         return None, f"{path.name} can't be read: {e}"
     return parse(text), ok
