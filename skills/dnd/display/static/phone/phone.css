@@ -72,7 +72,7 @@ body[data-layout="desktop"] .panes {
   gap: 0; max-width: 1400px; width: 100%; margin: 0 auto; align-items: start;
 }
 body[data-layout="desktop"] #pane-play { grid-area: play; border-right: 1px solid var(--line);
-  position: sticky; top: 57px; max-height: calc(100vh - 57px); overflow-y: auto; }
+  position: sticky; top: 53px; max-height: calc(100vh - 53px); overflow-y: auto; }
 body[data-layout="desktop"] #pane-sheet { grid-area: sheet; }
 body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid var(--line); }
 
