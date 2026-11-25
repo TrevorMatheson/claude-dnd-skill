@@ -254,7 +254,7 @@
       const ds = c.death_saves || {};
       const chips = list(c.conditions).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
       return head(b) + `<div class="hp-row">
-        <div class="hp"><span class="hp-cur${pct <= 35 ? ' low' : ''}">${esc(hp.current ?? '—')}</span><span class="hp-max">/ ${esc(hp.max ?? '—')}</span>
+        <div class="hp-line"><span class="hp-cur${pct <= 35 ? ' low' : ''}">${esc(hp.current ?? '—')}</span><span class="hp-max">/ ${esc(hp.max ?? '—')}</span>
           ${c.temp_hp ? `<span class="hp-temp">+${esc(c.temp_hp)} temp</span>` : ''}</div>
         <div class="hp-bar"><i style="width:${pct}%"></i></div></div>
         <dl class="stats">
@@ -286,7 +286,7 @@
     attacks(b) {
       if (!b.data.length) return head(b) + '<p class="muted">None listed</p>';
       return head(b) + `<div class="attacks">${b.data.map((a, i) =>
-        `<div class="atk"><button type="button" class="roll-row" data-roll="attack" data-i="${i}">
+        `<div class="atk-row"><button type="button" class="roll-row" data-roll="attack" data-i="${i}">
           <span class="n">${esc(a.name)}</span><span class="b">${sign(a.bonus)}</span></button>
           <div class="atk-d"><button type="button" class="dmg" data-roll="damage" data-i="${i}">${esc(a.damage || '—')}</button> ${esc(a.type)}</div>
           ${a.notes ? `<div class="atk-n">${esc(a.notes)}</div>` : ''}</div>`).join('')}</div>`;

@@ -150,7 +150,11 @@
     const sent = pick;
     root.PH.net.send('move', '/map/move', { character: app.me, x, y }, label).then((res) => {
       if (!res || res.notSent) return;
-      if (res.ok) { pick = null; check = null; bar.innerHTML = `<span class="mt-cost">Sent: ${esc(res.body && res.body.sent || label)}</span>`; drawPick(); return; }
+      if (res.ok) {
+        pick = null; check = null; drawPick();
+        bar.innerHTML = `<span class="mt-sent">Sent to the DM: ${esc(res.body && res.body.sent || label)}</span>`;
+        return;
+      }
       if (pick === sent) { check = Object.assign({ ok: false }, res.body || {}); drawPick(); }
     });
   }

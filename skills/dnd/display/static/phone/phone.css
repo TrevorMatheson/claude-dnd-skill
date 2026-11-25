@@ -120,7 +120,7 @@ body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid va
 .id-line { color: var(--ink-dim); font-style: italic; }
 
 .hp-row { margin: 6px 0 10px; }
-.hp { display: flex; align-items: baseline; gap: 6px; }
+.hp-line { display: flex; align-items: baseline; gap: 6px; }
 .hp-cur { font-family: var(--f-display); font-size: 2.6rem; font-weight: 600; line-height: 1; color: var(--hp); }
 .hp-cur.low { color: var(--hp-low); }
 .hp-max { color: var(--ink-dim); font-size: 1.2rem; }
@@ -156,8 +156,8 @@ body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid va
 .roll-row .n em { display: block; font-size: .72rem; color: var(--ink-dim); }
 .roll-row .b { font-family: var(--f-display); font-weight: 600; font-size: 1.1rem; }
 
-.atk { border-bottom: 1px dotted var(--line); padding: 4px 0 6px; }
-.atk .roll-row { border-bottom: 0; }
+.atk-row { border-bottom: 1px dotted var(--line); padding: 4px 0 6px; }
+.atk-row .roll-row { border-bottom: 0; }
 .atk-d { font-size: .9rem; color: var(--ink-dim); padding-left: 2px; }
 .atk-n { font-size: .8rem; color: var(--ink-dim); padding-left: 2px; }
 .dmg { background: none; border: 1px solid var(--line); padding: 2px 8px; min-height: 32px; color: var(--ink); }
@@ -213,7 +213,7 @@ body[data-layout="desktop"] #pane-map { grid-area: map; border-top: 1px solid va
 .faces { border: 1px dashed var(--line); padding: 10px; }
 .faces-h { margin-bottom: 8px; }
 .faces-in { display: flex; gap: 8px; flex-wrap: wrap; }
-.face { width: 72px; min-height: var(--tap); background: var(--bg-raise); color: var(--ink);
+.die-face { width: 72px; min-height: var(--tap); background: var(--bg-raise); color: var(--ink);
   border: 1px solid var(--line); font-size: 1.2rem; text-align: center; }
 .dice-pad { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .pad-h { font-family: var(--f-label); font-style: var(--label-style); color: var(--ink-dim); }
@@ -283,3 +283,10 @@ body[data-layout="desktop"] .mt-view { height: 70vh; }
 .mt-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: var(--tap); }
 .mt-cost { font-family: var(--f-display); font-size: 1.2rem; font-weight: 600; flex: 1; }
 .mt-why { color: var(--accent); flex: 1; }
+.mt-sent { color: var(--you); flex: 1; }
+
+/* Desktop: Play and Sheet each scroll within one screen, so the Map (in
+   combat) starts right below them instead of under the whole sheet. */
+@media (min-width: 700px) {
+  body[data-layout="desktop"] #pane-sheet { max-height: calc(100vh - 57px); overflow-y: auto; }
+}

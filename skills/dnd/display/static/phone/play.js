@@ -129,15 +129,15 @@
     el.innerHTML = `<div class="faces-h">${esc(opts.label || opts.spec)}: type what you rolled
       (${n === 2 ? 'both d20s' : n + ' × ' + esc(String(opts.spec).replace(/^\d+/, ''))})</div>
       <div class="faces-in">${Array.from({ length: n }, (_, i) =>
-        `<input type="number" inputmode="numeric" min="1" class="face" aria-label="Die ${i + 1}">`).join('')}
+        `<input type="number" inputmode="numeric" min="1" class="die-face" aria-label="Die ${i + 1}">`).join('')}
       <button type="button" class="btn primary" id="faces-go">Send</button>
       <button type="button" class="btn" id="faces-x">Cancel</button></div>`;
-    const first = el.querySelector('.face');
+    const first = el.querySelector('.die-face');
     if (first) first.focus();
     return new Promise((resolve) => {
       el.querySelector('#faces-x').onclick = () => { el.hidden = true; resolve(null); };
       el.querySelector('#faces-go').onclick = () => {
-        const faces = [...el.querySelectorAll('.face')].map((x) => parseInt(x.value, 10));
+        const faces = [...el.querySelectorAll('.die-face')].map((x) => parseInt(x.value, 10));
         if (faces.some((f) => !(f >= 1))) { note('Type each die you rolled', 'warn'); return; }
         el.hidden = true;
         resolve(roll(Object.assign({}, opts, { faces })));
