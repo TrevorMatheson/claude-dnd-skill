@@ -3497,6 +3497,86 @@ def sheet_change(name):
     return jsonify(body), code
 
 
+
+# ─── The phone's Map tab (phone sheet spec D13, milestone 2) ─────────────────
+# Through map_moves.py, the only file that knows the battle map's interface.
+# Until the battle map's check_move is installed, caps says so and the phone
+# keeps its Map tab hidden.
+
+@app.route("/map/caps", methods=["GET"])
+def map_caps():
+    return jsonify({"check": _map_check_available(),
+                    "board": os.path.isfile(os.path.join(_HERE, "static", "map", "board.js"))})
+
+
+def _map_move_request():
+    """(character, x, y, dash, data) from a /map/check or /map/move body, or
+    a Flask response to return."""
+    if not _token_ok():
+        return jsonify({"ok": False, "message": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    character = str(data.get("character", ""))[:50].strip()
+    if not character or not _CHAR_NAME_RE.match(character):
+        return jsonify({"ok": False, "message": "bad character name"}), 400
+    try:
+        x, y = int(data.get("x")), int(data.get("y"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "x and y must be whole numbers"}), 400
+    return character, x, y, bool(data.get("dash")), data
+
+
+def _map_check(character, x, y, dash):
+    import map_moves
+    try:
+        return map_moves.check(_campaign_dir(), character, x, y, dash), 200
+    except map_moves.MoveError as e:
+        return {"ok": False, "available": e.status != 501, "message": str(e)}, e.status
+
+
+@app.route("/map/check", methods=["POST"])
+def map_check():
+    """The battle map's dry run for a square the player tapped: the path and
+    its cost, or why not. Never changes the map."""
+    got = _map_move_request()
+    if not isinstance(got, tuple) or len(got) != 5:
+        return got
+    character, x, y, dash, _ = got
+    body, code = _map_check(character, x, y, dash)
+    return jsonify(body), code
+
+
+@app.route("/map/move", methods=["POST"])
+def map_move():
+    """Move here: checks again, then sends "moves to square X,Y - C of B ft"
+    as the player's action. Claude moves the token through the turn call;
+    a move the dry run refuses is never sent (409 with the reason)."""
+    got = _map_move_request()
+    if not isinstance(got, tuple) or len(got) != 5:
+        return got
+    character, x, y, dash, data = got
+    if not _rate_ok(request.remote_addr):
+        return jsonify({"ok": False, "message": "too many requests"}), 429
+    status = _device_ok(request.headers.get("X-DND-Device", ""), request.remote_addr)
+    if status == "denied":
+        return jsonify({"ok": False, "message": "this device isn't allowed"}), 403
+    if status == "pending":
+        return jsonify({"status": "pending"}), 202
+    op = str(data.get("op") or "")[:80]
+    if op and _sheet_op_get("stage:" + op) is not None:
+        return jsonify({"ok": True, "repeat": True}), 200
+    body, code = _map_check(character, x, y, dash)
+    if code != 200:
+        return jsonify(body), code
+    if not body.get("ok"):
+        return jsonify(body), 409
+    import map_moves
+    text = _sanitize_input(map_moves.move_text(body, x, y))
+    res = _stage_action(character, text, {"ready": True, "append": True, "op": op})
+    code = res[1] if isinstance(res, tuple) else 200
+    if code not in (200, 204):
+        return res
+    return jsonify({**body, "sent": text}), 200
+
 @app.route("/device/approve", methods=["POST"])
 def device_approve():
     """DM approves a pending device. Body: {"id": "<device_id>"}"""
@@ -3552,6 +3632,13 @@ def stage_input():
     data      = request.get_json(force=True, silent=True) or {}
     character = str(data.get("character", ""))[:50].strip()
     text      = _sanitize_input(str(data.get("text", "")))
+    return _stage_action(character, text, data)
+
+
+def _stage_action(character: str, text: str, data: dict):
+    """Stage (and with data["ready"], send) one character's action. Shared by
+    /player-input/stage and the phone's /map/move. The caller has checked the
+    token, the rate limit and the device."""
     op        = str(data.get("op") or "")[:80]
     if op and _sheet_op_get("stage:" + op) is not None:
         return "", 204
