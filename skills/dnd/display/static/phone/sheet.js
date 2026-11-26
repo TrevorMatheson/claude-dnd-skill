@@ -221,7 +221,7 @@
         return;
       }
       if (inList) { html += '</ul>'; inList = false; }
-      const h = ln.match(/^#{3,}\s+(.*)$/);
+      const h = ln.match(/^#{1,6}\s+(.*)$/);
       if (h) html += `<h4>${inline(h[1])}</h4>`;
       else if (ln.trim().startsWith('|')) html += `<p class="mono">${esc(ln)}</p>`;
       else if (ln.trim()) html += `<p>${inline(ln)}</p>`;
@@ -448,7 +448,13 @@
     li.after(box);
     fetch(`/srd-lookup?name=${encodeURIComponent(name)}&category=spell`, { headers: app.headers(false) })
       .then((r) => r.json().catch(() => ({})))
-      .then((j) => { box.innerHTML = j && j.found ? md(j.text) : '<p class="muted">No description available</p>'; })
+      .then((j) => {
+        if (j && j.found) { box.innerHTML = md(j.text); return; }
+        // Not in the SRD data: link the reference page the server offers.
+        const url = j && typeof j.reference_url === 'string' && /^https:\/\//.test(j.reference_url) ? j.reference_url : '';
+        box.innerHTML = '<p class="muted">No description available'
+          + (url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">look it up</a>` : '') + '</p>';
+      })
       .catch(() => { box.innerHTML = '<p class="muted">No description available</p>'; });
   }
 

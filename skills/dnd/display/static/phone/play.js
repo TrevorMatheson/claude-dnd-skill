@@ -126,6 +126,9 @@
     const n = faceCount(opts.spec, opts.advantage);
     const el = $('faces');
     el.hidden = false;
+    // A tap on the Sheet tab lands here too: on a phone, show Play so the
+    // player sees where to type the die (QA AC9).
+    if (app && app.layout === 'phone' && app.tab !== 'play') app.setTab('play');
     el.innerHTML = `<div class="faces-h">${esc(opts.label || opts.spec)}: type what you rolled
       (${n === 2 ? 'both d20s' : n + ' × ' + esc(String(opts.spec).replace(/^\d+/, ''))})</div>
       <div class="faces-in">${Array.from({ length: n }, (_, i) =>
@@ -133,6 +136,7 @@
       <button type="button" class="btn primary" id="faces-go">Send</button>
       <button type="button" class="btn" id="faces-x">Cancel</button></div>`;
     const first = el.querySelector('.die-face');
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
     if (first) first.focus();
     return new Promise((resolve) => {
       el.querySelector('#faces-x').onclick = () => { el.hidden = true; resolve(null); };
